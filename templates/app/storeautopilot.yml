@@ -1,0 +1,32 @@
+# StoreAutopilot settings. Non-secret values only.
+# Keys live outside the repo in ~/.storeautopilot/{{app_id}}/ (asc_key.p8, asc_key.json, play.json).
+app_id: {{app_id}}
+flutter_project: {{flutter_project}}
+
+# Locale ids used in store.md → each store's language code.
+locales:
+{{locales}}
+
+# Screenshot ids in store order; the integration test calls takeStoreScreenshot(tester, '<id>') for each.
+screenshots: [01_home]
+
+brand:
+  background: "{{background}}"
+  text: "#FFFFFF"
+  accent: "#F59E0B"
+  font: -apple-system, Helvetica Neue, Arial, sans-serif
+
+ios:
+  bundle_id: {{bundle_id}}
+  # ipad: false               # default: follow the Xcode project
+  # phased_release: true      # after approval, release to users over 7 days
+  # testflight_notes: true    # release_notes become TestFlight's "What to Test" (waits a few minutes for the build)
+{{encryption_line}}
+
+android:
+  package: {{package}}
+  track: internal
+  release_status: completed   # "draft" while Play still treats the app as a draft
+  # emulator: Pixel_8         # AVD name; default: the first one
+  # keystore_properties: ~/Keys/{{app_id}}/key.properties
+  # rollout: 20               # submit starts production with 20% of users; widen with `storeautopilot rollout 50`

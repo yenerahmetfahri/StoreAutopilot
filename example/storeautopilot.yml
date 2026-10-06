@@ -1,0 +1,21 @@
+# StoreAutopilot settings for the example app. Non-secret values only.
+app_id: storeautopilot-example
+flutter_project: .
+
+locales:
+  en: { apple: en-US, play: en-US }
+  de: { apple: de-DE, play: de-DE }
+
+screenshots: [01_tasks, 02_stats]
+
+brand:
+  background: "#1E3A8A"
+  text: "#FFFFFF"
+  accent: "#FBBF24"
+
+ios:
+  bundle_id: dev.storeautopilot.storeautopilotExample
+
+android:
+  package: dev.storeautopilot.storeautopilot_example
+  track: internal

@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+$stdout.sync = true
+require_relative "../lib/storeautopilot"
+exit StoreAutopilot::CLI.start(ARGV)

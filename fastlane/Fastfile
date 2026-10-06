@@ -1,0 +1,243 @@
+# StoreAutopilot lanes. Called by lib/storeautopilot/fastlane.rb only; all data comes from the job file.
+require "json"
+require "shellwords"
+
+default_platform(:ios)
+skip_docs
+
+def job = @job ||= JSON.parse(File.read(ENV.fetch("STOREAUTOPILOT_JOB")))
+def output(hash) = File.write(job["output"], JSON.generate(hash))
+def asc = @asc ||= JSON.parse(File.read(job["asc_json"]))
+
+# Runs a status lane's body; any failure becomes {"error": "..."} in the output, so the caller can explain it.
+def reporting_errors
+  yield
+rescue StandardError => e
+  output(error: e.message.lines.first.to_s.strip)
+end
+
+def asc_login
+  app_store_connect_api_key(key_id: asc["key_id"], issuer_id: asc["issuer_id"], key_filepath: job["asc_key"])
+end
+
+# Lets xcodebuild create/download signing assets with the API key (automatic signing, no Apple ID login).
+def xcode_auth_args
+  ["-allowProvisioningUpdates", "-authenticationKeyPath", job["asc_key"],
+   "-authenticationKeyID", asc["key_id"], "-authenticationKeyIssuerID", asc["issuer_id"]].shelljoin
+end
+
+# deliver always reads the version's App Review detail (review_attachment_file) and crashes with "No data" when it
+# does not exist yet, as on an app's first version. Create an empty one first.
+def ensure_review_detail
+  app = Spaceship::ConnectAPI::App.find(job["bundle_id"])
+  UI.user_error!("No app with bundle ID #{job['bundle_id']} in App Store Connect. Create the app record first.") unless app
+  version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+  return unless version
+  begin
+    version.fetch_app_store_review_detail
+  rescue RuntimeError
+    UI.message("Creating the App Review detail for #{version.version_string}")
+    version.create_app_store_review_detail(attributes: { demo_account_required: false })
+  end
+end
+
+# Apple asks whether the app shows third-party content; review can't start without an answer. job["content_rights"]
+# comes from store.md's third_party_content.
+def ensure_content_rights(app)
+  wanted = job["content_rights"]
+  return if wanted.nil? || app.nil? || app.content_rights_declaration == wanted
+  UI.message("Declaring content rights: #{wanted}")
+  app.update(attributes: { content_rights_declaration: wanted })
+end
+
+platform :ios do
+  # Whether the app record exists, which versions are live / in review / awaiting release, and the newest build number.
+  lane :status do
+    reporting_errors do
+      asc_login
+      app = Spaceship::ConnectAPI::App.find(job["bundle_id"])
+      next output(app: false) unless app
+      ios = Spaceship::ConnectAPI::Platform::IOS
+      output(app: true,
+             live_version: app.get_live_app_store_version(platform: ios)&.version_string,
+             in_review_version: app.get_in_review_app_store_version(platform: ios)&.version_string,
+             pending_release_version: app.get_pending_release_app_store_version(platform: ios)&.version_string,
+             build_number: latest_testflight_build_number(app_identifier: job["bundle_id"], initial_build_number: 0).to_i)
+    end
+  end
+
+  # The store text as App Store Connect has it now (live version if any, else the newest), per locale; read only.
+  lane :listing do
+    reporting_errors do
+      asc_login
+      app = Spaceship::ConnectAPI::App.find(job["bundle_id"])
+      next output(app: false) unless app
+      ios = Spaceship::ConnectAPI::Platform::IOS
+      version = app.get_live_app_store_version(platform: ios) || app.get_latest_app_store_version(platform: ios)
+      info = app.fetch_live_app_info || app.fetch_latest_app_info
+      locales = Hash.new { |h, k| h[k] = {} }
+      info&.get_app_info_localizations&.each do |l|
+        locales[l.locale].merge!(name: l.name, subtitle: l.subtitle, privacy_url: l.privacy_policy_url)
+      end
+      version&.get_app_store_version_localizations&.each do |l|
+        locales[l.locale].merge!(description: l.description, keywords: l.keywords, promotional_text: l.promotional_text,
+                                 release_notes: l.whats_new, support_url: l.support_url, marketing_url: l.marketing_url)
+      end
+      output(app: true, copyright: version&.copyright, apple_category: info&.primary_category&.id, locales: locales)
+    end
+  end
+
+  lane :upload do
+    asc_login
+    build_app(workspace: job["workspace"], scheme: "Runner", configuration: "Release", export_method: "app-store",
+              output_directory: job["build_dir"], output_name: "app.ipa", clean: true,
+              # One archive in our build folder, replaced each release, instead of a new one in Xcode's Archives
+              # folder every time (several hundred MB each). App Store Connect keeps the uploaded build's symbols.
+              archive_path: File.join(job["build_dir"], "app.xcarchive"),
+              xcargs: xcode_auth_args) # gym also passes xcargs to -exportArchive; export_xcargs would duplicate them
+    # With notes, pilot waits until the build shows up in App Store Connect (not for processing) to set "What to Test".
+    notes = job["testflight_notes"] || {}
+    upload_to_testflight(ipa: File.join(job["build_dir"], "app.ipa"), skip_waiting_for_build_processing: true,
+                         changelog: notes.values.first,
+                         localized_build_info: (notes.transform_values { |text| { whats_new: text } } if notes.any?))
+  end
+
+  lane :metadata do
+    asc_login
+    ensure_review_detail
+    upload_to_app_store(app_identifier: job["bundle_id"], app_version: job["version"],
+                        metadata_path: job["metadata_path"], skip_metadata: job["metadata_path"].nil?,
+                        screenshots_path: job["screenshots_path"], skip_screenshots: job["screenshots_path"].nil?,
+                        overwrite_screenshots: true, app_rating_config_path: job["age_rating"],
+                        skip_binary_upload: true, submit_for_review: false, force: true,
+                        run_precheck_before_submit: false)
+  end
+
+  # Everything App Review needs for this version, as facts for the caller to judge; read only.
+  lane :readiness do
+    reporting_errors do
+      asc_login
+      app = Spaceship::ConnectAPI::App.find(job["bundle_id"])
+      next output(app: false) unless app
+      version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+      version = nil unless version&.version_string == job["version"]
+      build = app.get_builds(filter: { "preReleaseVersion.version" => job["version"] }, sort: "-uploadedDate", limit: 1).first
+      info = app.fetch_edit_app_info || app.fetch_latest_app_info
+      review = begin
+        version&.fetch_app_store_review_detail
+      rescue RuntimeError
+        nil
+      end
+      contact = review && [review.contact_first_name, review.contact_last_name, review.contact_phone, review.contact_email]
+      age = info&.fetch_age_rating_declaration
+      screenshots = (version&.get_app_store_version_localizations || []).to_h do |l|
+        [l.locale, l.get_app_screenshot_sets.select { |set| Array(set.app_screenshots).any? }.map(&:screenshot_display_type)]
+      end
+      output(app: true, version: version&.version_string,
+             build: build && { number: build.version, state: build.processing_state },
+             screenshots: screenshots,
+             review_contact: !contact.nil? && contact.none? { |v| v.to_s.strip.empty? },
+             age_rating: !age.nil? && %i[gambling_simulated violence_cartoon_or_fantasy horror_or_fear_themes].any? { |a| !age.public_send(a).nil? },
+             content_rights: app.content_rights_declaration,
+             privacy_urls: (info&.get_app_info_localizations || []).to_h { |l| [l.locale, l.privacy_policy_url.to_s] })
+    end
+  end
+
+  lane :submit do
+    asc_login
+    ensure_content_rights(Spaceship::ConnectAPI::App.find(job["bundle_id"]))
+    number = latest_testflight_build_number(app_identifier: job["bundle_id"], version: job["version"]).to_s
+    upload_to_app_store(app_identifier: job["bundle_id"], app_version: job["version"], build_number: number,
+                        skip_binary_upload: true, skip_metadata: true, skip_screenshots: true,
+                        submit_for_review: true, automatic_release: false, phased_release: job["phased_release"] == true,
+                        force: true,
+                        run_precheck_before_submit: false,
+                        submission_information: { add_id_info_uses_idfa: false })
+    output(build_number: number.to_i)
+  end
+end
+
+platform :android do
+  TRACKS = %w[internal alpha beta production].freeze
+
+  # The store listing as Google Play has it now, per language; read only (the edit is thrown away).
+  lane :listing do
+    reporting_errors do
+      require "supply"
+      Supply.config = FastlaneCore::Configuration.create(Supply::Options.available_options,
+                                                         package_name: job["package"], json_key: job["play_json"])
+      client = Supply::Client.make_from_config
+      client.begin_edit(package_name: job["package"])
+      locales = client.listings.to_h do |l|
+        [l.language, { name: l.title, short_description: l.short_description, description: l.full_description }]
+      end
+      client.abort_current_edit
+      output(locales: locales)
+    end
+  end
+
+  # Uploads the Data safety form as the CSV Play Console exports (App content → Data safety → Export to CSV).
+  lane :data_safety do
+    require "supply"
+    Supply.config = FastlaneCore::Configuration.create(Supply::Options.available_options,
+                                                       package_name: job["package"], json_key: job["play_json"])
+    request = Google::Apis::AndroidpublisherV3::SafetyLabelsUpdateRequest.new(safety_labels: File.read(job["csv"]))
+    Supply::Client.make_from_config.client.data_application_safety(job["package"], request)
+    UI.success("Data safety form updated")
+  end
+
+  # Version codes on every track; a track that can't be read is reported under errors.
+  lane :status do
+    tracks = {}
+    errors = {}
+    TRACKS.each do |track|
+      tracks[track] = google_play_track_version_codes(package_name: job["package"], track: track,
+                                                      json_key: job["play_json"]).map(&:to_i)
+    rescue StandardError => e
+      errors[track] = e.message.lines.first.to_s.strip
+    end
+    result = { tracks: tracks, errors: errors }
+    result[:error] = errors.values.first if tracks.empty? # nothing readable at all: worth another try
+    output(result)
+  end
+
+  lane :upload do
+    upload_to_play_store(package_name: job["package"], json_key: job["play_json"], track: job["track"],
+                         aab: job["aab"], release_status: job["release_status"], metadata_path: job["metadata_path"],
+                         skip_upload_apk: true, skip_upload_metadata: true, skip_upload_images: true,
+                         skip_upload_screenshots: true)
+  end
+
+  lane :metadata do
+    # supply needs a release to attach the listing to; without version_code it looks for version code nil and fails
+    # ("Could not find release for version code ''"). Use the newest release on the configured track.
+    code = google_play_track_version_codes(package_name: job["package"], track: job["track"], json_key: job["play_json"]).map(&:to_i).max
+    UI.user_error!("Nothing on the #{job['track']} track to attach the listing to.") unless code
+    upload_to_play_store(package_name: job["package"], json_key: job["play_json"], metadata_path: job["metadata_path"],
+                         track: job["track"], version_code: code,
+                         skip_upload_apk: true, skip_upload_aab: true, skip_upload_changelogs: true,
+                         skip_upload_metadata: !job["text"], skip_upload_images: !job["images"],
+                         skip_upload_screenshots: !job["images"], sync_image_upload: true)
+  end
+
+  # rollout (0..1) below 1 starts a staged rollout to that share of users.
+  lane :promote do
+    code = google_play_track_version_codes(package_name: job["package"], track: job["track"], json_key: job["play_json"]).map(&:to_i).max
+    UI.user_error!("Nothing on the #{job['track']} track to promote.") unless code
+    staged = job["rollout"] && job["rollout"] < 1
+    upload_to_play_store(package_name: job["package"], json_key: job["play_json"], track: job["track"],
+                         track_promote_to: "production", version_code: code, release_status: "completed",
+                         rollout: (job["rollout"].to_s if staged),
+                         skip_upload_apk: true, skip_upload_aab: true, skip_upload_metadata: true,
+                         skip_upload_changelogs: true, skip_upload_images: true, skip_upload_screenshots: true)
+    output(version_code: code)
+  end
+
+  # Changes the share of users a staged production rollout reaches; 1 completes it.
+  lane :rollout do
+    upload_to_play_store(package_name: job["package"], json_key: job["play_json"], track: "production",
+                         rollout: job["rollout"].to_s,
+                         skip_upload_apk: true, skip_upload_aab: true, skip_upload_metadata: true,
+                         skip_upload_changelogs: true, skip_upload_images: true, skip_upload_screenshots: true)
+  end
+end

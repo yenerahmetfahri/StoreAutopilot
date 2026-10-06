@@ -1,0 +1,33 @@
+# StoreAutopilot: runs only on this repo's own Mac runner.
+# Only push and manual triggers — never let code from forks or PRs run on this Mac.
+name: Store
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+    inputs:
+      submit_for_review:
+        description: "Submit the latest build for App Store review and promote Google Play to production"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storeautopilot
+  cancel-in-progress: false
+
+jobs:
+  store:
+    runs-on: [self-hosted, storeautopilot]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release
+        if: ${{ !inputs.submit_for_review }}
+        run: storeautopilot release
+      - name: Submit for review
+        if: ${{ inputs.submit_for_review }}
+        run: storeautopilot submit

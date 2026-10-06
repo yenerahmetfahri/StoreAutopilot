@@ -1,0 +1,7 @@
+# fastlane writes these next to the Fastfile on every run
+fastlane/report.xml
+fastlane/README.md
+fastlane/screenshots/
+fastlane/test_output/
+
+.DS_Store
