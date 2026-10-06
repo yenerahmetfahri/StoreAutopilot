@@ -2,83 +2,107 @@
 
 Release a Flutter app to the App Store and Google Play by pushing to a branch.
 
-You push to `release`. Your Mac takes fresh screenshots of the app on iPhone and iPad simulators and an Android emulator,
-puts them into store images with your captions and colors, builds the app, uploads it to TestFlight and Google Play,
-and updates the store text and images. When you want the version to go live, you click one button.
+<p align="center">
+  <img src="docs/images/iphone.jpg" height="360" alt="iPhone store image">&nbsp;
+  <img src="docs/images/ipad.jpg" height="360" alt="iPad store image">&nbsp;
+  <img src="docs/images/android.jpg" height="360" alt="Google Play store image">
+</p>
+<p align="center"><sub>Store images made by StoreAutopilot from the <a href="example">example app</a>: iPhone, iPad (in German) and Android.</sub></p>
 
-It costs nothing to run, your repository stays private, and your keys never leave your Mac.
+You push to `release`. Your own Mac takes fresh screenshots of the app, turns them into store images with your
+captions and colors, builds the app, uploads it to TestFlight and Google Play, and updates the store text. When the
+build has been tested, one more command sends it to App Review and to Google Play production.
+
+It costs nothing to run, your repository stays private, and your signing keys never leave your Mac.
 
 ## Why
 
-Shipping an update usually means an hour of store chores: new screenshots for every language, resizing them, writing
-the same text into two web consoles, bumping build numbers, building twice, uploading twice. StoreAutopilot does all
-of that from two files that live in your app's repository:
+Shipping an update usually means an hour of store chores: new screenshots for every language and device, the same
+text typed into two web consoles, build numbers, two builds, two uploads. StoreAutopilot does that work from two
+files kept in your app's repository:
 
-- `storeautopilot.yml` – which platforms, languages, screenshots and brand colors
-- `store.md` – everything the stores show: name, description, keywords, release notes, screenshot captions
+| File | What's in it |
+|---|---|
+| `storeautopilot.yml` | Platforms, languages, which screenshots to take, brand colors, optional features |
+| `store.md` | Everything the stores show: name, description, keywords, release notes, screenshot captions |
 
-Edit those files, push, and the stores follow.
+Change the files, push, and the stores follow.
 
 ## How it works
 
-StoreAutopilot runs on your own Mac as a GitHub Actions runner for your private repository. GitHub runners on your own
-machine are free, so there are no paid build minutes. A push to the `release` branch starts this:
+StoreAutopilot runs on your Mac as a GitHub Actions runner for your private repository. Runners on your own machine
+are free, so there are no build minutes to pay for.
 
-1. **Store check.** It asks App Store Connect and Google Play about the app before anything is built. If the version
-   in your `pubspec.yaml` is already live or approved and waiting to be released, it stops right away and tells you
-   which version to use instead. Otherwise it takes the highest build number of both stores and uses the next one on
-   both.
-2. **Screenshots.** It runs your screenshot test (a normal Flutter integration test) on a 6.9" iPhone simulator, a
-   13" iPad simulator if your app runs on iPad, and an Android emulator, once per language. Each device is captured
-   separately, so each store gets real screenshots of its own platform.
-3. **Store images.** Each screenshot is placed into an HTML template with its caption and rendered with headless
-   Chrome at the exact size each store requires. A Google Play feature graphic is made the same way.
-4. **Build and upload.** The iOS app is built and uploaded to TestFlight. The Android app bundle is built, checked to
-   be signed with your upload key (not the debug key), and uploaded to the Play track you chose.
-5. **Store listing.** Text and images are uploaded only if they changed since the last release.
+```mermaid
+flowchart LR
+    A[git push<br>to release] --> B[Build number<br>from both stores]
+    B --> C[Screenshots<br>iPhone · iPad · Android]
+    C --> D[Store images<br>captions + colors]
+    D --> E[Build<br>iOS + Android]
+    E --> F[Upload<br>TestFlight · Play track]
+    F --> G[Store text<br>and images]
+    G -.-> H[storeautopilot submit<br>App Review · production]
+```
 
-Submitting for App Store review and promoting to Google Play production is a separate, manual step, so a careless
-push never ends up in front of reviewers or users.
+1. **Build number.** The highest build number in TestFlight and Google Play, plus one, used for both. The version
+   name (`1.2.0`) comes from `pubspec.yaml`.
+2. **Screenshots.** Your screenshot test (an ordinary Flutter integration test) runs on a 6.9" iPhone simulator, a 13"
+   iPad simulator if the app runs on iPad, and an Android emulator, once per language.
+3. **Store images.** Each screenshot is placed in an HTML template with its caption and rendered at the exact size
+   each store wants. Google Play's feature graphic is made the same way.
+4. **Build and upload.** iOS goes to TestFlight; the Android bundle is checked to be signed with your upload key and
+   goes to the Play track you chose.
+5. **Store text and images.** Uploaded only if they changed since the last release.
+
+Sending a version to App Review and promoting it to Google Play production is a separate command, so a careless push
+never reaches reviewers or users.
 
 ## Requirements
 
-- A Mac with Xcode and an iOS simulator runtime
-- Flutter
-- Android Studio with the Android SDK and at least one emulator (AVD)
-- Google Chrome
-- Homebrew (it brings Ruby and fastlane along); without it, Ruby 3.1 or newer and fastlane
-- GitHub CLI, logged in (`brew install gh && gh auth login`)
-- Your app in a **private** GitHub repository
-- An Apple Developer account and a Google Play developer account
+| You need | For |
+|---|---|
+| A Mac with Xcode and an iOS simulator runtime | building iOS and taking iPhone/iPad screenshots |
+| Flutter | building the app |
+| Android Studio with the SDK and one emulator | building Android and taking Android screenshots |
+| Google Chrome | rendering the store images |
+| Homebrew | installing StoreAutopilot, Ruby and fastlane |
+| GitHub CLI, logged in (`gh auth login`) | connecting your Mac as the repository's runner |
+| A **private** GitHub repository for your app | running releases on your Mac safely |
+| Apple Developer and Google Play developer accounts | publishing |
 
 ## Install
 
     brew install yenerahmetfahri/storeautopilot/storeautopilot
-
-This also installs Ruby and fastlane. Check it works:
-
     storeautopilot --version
 
-To update later: `brew upgrade storeautopilot`.
+Homebrew brings Ruby and fastlane along. Update later with `brew upgrade storeautopilot`.
 
-Without Homebrew, clone the repository and link the command:
+<details>
+<summary>Without Homebrew</summary>
+
+Install Ruby 3.1 or newer and fastlane, then:
 
     git clone https://github.com/yenerahmetfahri/StoreAutopilot.git ~/StoreAutopilot
-    ln -s ~/StoreAutopilot/bin/storeautopilot /opt/homebrew/bin/storeautopilot
+    ln -s ~/StoreAutopilot/bin/storeautopilot /usr/local/bin/storeautopilot
 
-## Try it first
+</details>
 
-The [example](example) folder of this repository holds a small Flutter app that is already set up. To see the store
-images it produces on your Mac, without any store account or upload:
+## Try it with the example
+
+The [example](example) folder holds a small Flutter app that is already set up. To see what StoreAutopilot makes,
+without any store account and without uploading anything:
 
     git clone https://github.com/yenerahmetfahri/StoreAutopilot.git
     cd StoreAutopilot/example
     storeautopilot shots
 
-## Set up an app
+It takes the screenshots on the simulators, builds the store images and opens a preview of both store pages:
 
-You do this once per app. `storeautopilot doctor` checks every step below and tells you what is still missing, so run
-it whenever you are unsure.
+<p align="center"><img src="docs/images/preview.jpg" width="760" alt="Store preview page"></p>
+
+## Set up your app
+
+You do this once per app. At any point, `storeautopilot doctor` checks the setup and tells you what is still missing.
 
 ### 1. Add the files
 
@@ -86,26 +110,22 @@ In the root of your app's repository:
 
     storeautopilot init
 
-It asks a few questions — the app's name, languages, support and privacy URLs, App Store category, whether the app
-shows content it doesn't own or uses its own encryption, a brand color — and fills in the files with the answers.
-Press Enter to keep a suggestion; everything can be changed later. It adds the following and never overwrites a file
-that already exists:
+It asks a few questions (the app's name, languages, support and privacy URLs, App Store category, a brand color) and
+writes these files, never overwriting one that exists:
 
 | File | What it is |
 |---|---|
-| `storeautopilot.yml` | Settings. Bundle ID and package name are filled in from your project. |
-| `store.md` | Store text for every language. |
-| `storeautopilot/frame.html`, `feature.html` | Templates for the store images. Change them as you like. |
-| `integration_test/store_screenshots_test.dart` | The screenshot test you fill in. |
-| `test_driver/store_screenshots_driver.dart` | Saves the screenshots. No need to touch it. |
-| `.github/workflows/store.yml` | The GitHub Actions workflow. |
+| `storeautopilot.yml` | Settings; bundle ID and package name are read from your project |
+| `store.md` | Store text for every language |
+| `storeautopilot/frame.html`, `feature.html` | Templates for the store images; change them as you like |
+| `integration_test/store_screenshots_test.dart` | The screenshot test you fill in |
+| `test_driver/store_screenshots_driver.dart` | Saves the screenshots; no need to touch it |
+| `.github/workflows/store.yml` | The workflow that runs on your Mac |
 
-It also adds `integration_test` and `flutter_driver` to your dev dependencies, adds rules to `.gitignore` so keys
-and keystores can't be committed, and creates a private folder for your keys: `~/.storeautopilot/<app_id>/`.
+It also adds the test packages to `pubspec.yaml`, adds rules to `.gitignore` so keys can't be committed, and creates
+a private folder for your keys: `~/.storeautopilot/<app_id>/`.
 
-### 2. Fill in the settings
-
-`storeautopilot.yml`:
+### 2. Settings
 
 ```yaml
 app_id: my-app                 # name of the key folder, ~/.storeautopilot/my-app
@@ -115,7 +135,7 @@ locales:                       # your language ids → each store's language cod
   en: { apple: en-US, play: en-US }
   de: { apple: de-DE, play: de-DE }
 
-screenshots: [01_home, 02_game, 03_stats]   # in the order the stores should show them
+screenshots: [01_home, 02_game, 03_stats]   # in the order the stores show them
 
 brand:
   background: "#111827"
@@ -124,37 +144,37 @@ brand:
 
 ios:
   bundle_id: com.example.myapp
-  # ipad: false                # default: follow the Xcode project (iPad screenshots if the app runs on iPad)
-  # phased_release: true       # after approval, release to users gradually over 7 days
-  # testflight_notes: true     # release_notes become TestFlight's "What to Test" (the upload waits a few minutes)
-  # uses_encryption: false     # only encryption built into iOS (HTTPS…): no export compliance question per build
 
 android:
   package: com.example.myapp
   track: internal              # internal, alpha, beta or production
-  release_status: completed    # use "draft" while Play still treats the app as a draft
-  # emulator: Pixel_8          # AVD to use; default is the first one
-  # keystore_properties: ~/Keys/my-app/key.properties   # lets doctor check signing
-  # rollout: 20                # production starts with 20% of users (see "Going live")
-  # halt_crash_rate: 1.09      # rollout watch halts above this crash rate (percent)
 ```
 
-Leave out `ios` or `android` if you only publish to one store.
+Leave out `ios` or `android` if you publish to one store only. A few more settings, all optional:
 
-### 3. Write the store text
+| Setting | What it does |
+|---|---|
+| `ios.ipad` | `true`/`false`; by default follows the Xcode project (iPad screenshots when the app runs on iPad) |
+| `ios.uses_encryption: false` | Answers Apple's export compliance question once, so TestFlight stops asking for every build |
+| `ios.phased_release: true` | After approval, the update reaches users gradually over seven days |
+| `ios.testflight_notes: true` | `release_notes` become TestFlight's "What to Test" (the upload waits a few minutes for the build) |
+| `android.rollout: 20` | Production starts with 20% of users; widen it with `storeautopilot rollout` |
+| `android.release_status: draft` | For apps Google Play still treats as drafts |
+| `android.emulator` | Which emulator to use; by default the first one |
 
-`store.md` has a short header for links, then one section per language:
+### 3. Store text
+
+`store.md` starts with a short header, then has one section per language:
 
 ```markdown
 ---
 support_url: https://example.com/support
 privacy_url: https://example.com/privacy
-marketing_url: https://example.com
 copyright: 2026 Example Ltd
 review_notes: |
-  Notes for the App Store reviewer: how to test, demo account.
+  No login needed. Delete the account in Settings → Delete account.
 review_contact: { first_name: Jane, last_name: Doe, phone: "+1 555 010 0100", email: jane@example.com }
-review_demo_user: reviewer@example.com
+third_party_content: false
 ---
 # en
 ## name
@@ -163,7 +183,6 @@ My App
 Short line under the name (App Store)
 ## keywords
 puzzle,words,daily
-## promotional_text
 ## description
 The full description.
 ## short_description
@@ -176,33 +195,34 @@ What's new in this version.
 - 03_stats: Watch yourself improve
 ```
 
-Every field is checked against the store's length limits before anything is built, so a description that is too long
-fails in a second, not after a 20-minute build. Inside a section, don't start a line with `#`.
+Every field is checked against the store's limit before anything is built, so a description that is too long fails
+in a second, not after a twenty-minute build:
 
-`doctor` and `release` also point out text that works against you without breaking anything: keywords already in the
-name or subtitle (the App Store searches those anyway), spaces after commas and repeated keywords (they eat into the
-100 characters), unused keyword room, captions long enough to wrap to three lines, missing release notes.
+| Field | App Store | Google Play |
+|---|---|---|
+| name | 30 | 30 |
+| subtitle | 30 | — |
+| keywords | 100 | — |
+| promotional_text | 170 | — |
+| short_description | — | 80 |
+| description | 4000 | 4000 |
+| release_notes | 4000 | 500 |
 
-`review_contact` and `review_demo_user` are for App Review: who Apple contacts if the review gets stuck, and the login
-to use if your app needs one. The demo account's password goes in
-`~/.storeautopilot/<app_id>/review_demo_password.txt`, never in `store.md`.
+The header can also hold notes and a contact for App Review, a demo account's user name (`review_demo_user`; its
+password goes in `~/.storeautopilot/<app_id>/review_demo_password.txt`, never in `store.md`), and whether the app
+shows content it doesn't own (`third_party_content`).
 
-**App already in the stores?** Skip writing it by hand:
+**Already in the stores?** `storeautopilot import` reads the current text from App Store Connect and Google Play and
+writes it into `store.md` for you (or `store.imported.md`, if you already have one).
 
-    storeautopilot import
+### 4. Screenshot test
 
-This reads the current text from App Store Connect and Google Play and writes `store.md` (or `store.imported.md` if
-you already have one, so nothing is overwritten). Where the two stores differ it keeps the App Store text and tells
-you.
-
-### 4. Write the screenshot test
-
-Open `integration_test/store_screenshots_test.dart`. Start your app with demo data (no real account, no network), go to
-each screen and call `takeStoreScreenshot` with the ids from `storeautopilot.yml`:
+Open `integration_test/store_screenshots_test.dart`, start your app with demo data, go to each screen and take a
+screenshot with each id from `storeautopilot.yml`:
 
 ```dart
 testWidgets('store screenshots', (tester) async {
-  await app.startForScreenshots(locale: storeLocale);
+  await tester.pumpWidget(MyApp(locale: storeLocale));
   await takeStoreScreenshot(tester, '01_home');
 
   await tester.tap(find.text('Play'));
@@ -210,236 +230,198 @@ testWidgets('store screenshots', (tester) async {
 });
 ```
 
-`storeLocale` holds the current language id, so you can start the app in that language. `storeDevice` is `phone` or
-`tablet` (iPad), in case a screen should look different on the larger display. Then preview the result:
+`storeLocale` is the language being captured and `storeDevice` is `phone` or `tablet`. Check the result with
+`storeautopilot shots`; `storeautopilot preview` shows the page again after you edit `store.md`.
 
-    storeautopilot shots
+### 5. Keys
 
-This captures everything, builds the store images and opens a preview page: per language, the App Store and Google
-Play pages side by side with their images, character counts against each limit, and suggestions for the text.
-Nothing is uploaded. `storeautopilot preview` opens the same page after you edit `store.md`, without new screenshots.
-
-### 5. Add your keys
-
-Put these files in `~/.storeautopilot/<app_id>/`. They never go into your repository or into GitHub.
+Put these in `~/.storeautopilot/<app_id>/`. They stay on your Mac; nothing is stored in git or GitHub.
 
 | File | Where it comes from |
 |---|---|
-| `asc_key.p8` | App Store Connect → Users and Access → Integrations → App Store Connect API. Create a key with the App Manager role and download it. |
-| `asc_key.json` | `{"key_id": "…", "issuer_id": "…"}`, both shown on the same page. |
-| `play.json` | Google Cloud: create a service account and a JSON key. In Play Console → Users and permissions, invite the service account's email with release and store listing permissions. |
+| `asc_key.p8` | App Store Connect → Users and Access → Integrations → App Store Connect API: create a key with the App Manager role |
+| `asc_key.json` | `{"key_id": "…", "issuer_id": "…"}`, both shown on that page |
+| `play.json` | Google Cloud: a service account with a JSON key, invited in Play Console → Users and permissions with release and store listing rights |
 
-Android release signing is not done by StoreAutopilot: set it up in Gradle as usual, with your upload keystore on
-this Mac.
+Android release signing stays in your Gradle setup, with your upload keystore on this Mac.
 
-**Export compliance:** Apple asks about encryption for every build, and TestFlight holds the build until it is
-answered. If your app only uses the encryption built into iOS (HTTPS, Keychain and the like), set
-`uses_encryption: false` under `ios`: the answer is written into `Info.plist` on the next build (commit that change)
-and Apple stops asking.
+### 6. Privacy forms
 
-### 6. Declare what data the app collects
-
-Both stores ask what your app collects and why: App Store Connect in **App Privacy**, Google Play in **Data
-safety**. Neither form can be filled through an API key, so you fill them in by hand — but from one list in
-`store.md`:
+Both stores ask what your app collects and why: **App Privacy** in App Store Connect, **Data safety** in Play
+Console. Neither form can be filled in through an API key, so you fill them in by hand — from one list:
 
     storeautopilot privacy
 
-The first time, this suggests a `privacy` section based on the packages your app uses (AdMob, Firebase, RevenueCat,
-sign-in packages and others). Adjust it and add it to `store.md`'s header:
+The first time, it suggests a `privacy` section for `store.md` based on the packages your app uses (AdMob, Firebase,
+RevenueCat, sign-in packages and others). After you add it, the same command prints what to tick in each store, in
+that store's own words.
 
-```yaml
-privacy:
-  tracking: false
-  encrypted_in_transit: true
-  deletion_request: true
-  collected:
-    - { type: email, purposes: [account], linked: true }
-    - { type: device_id, purposes: [advertising], linked: false, shared: true }
-    - { type: crash_data, purposes: [analytics] }
-```
+### 7. The steps with no API
 
-Run it again and it prints, for each store, exactly what to tick, in that store's own words. `doctor` warns when a
-package you use is known to collect data your list leaves out — a common reason for rejection.
+Done once, by hand:
 
-Google Play can also take the form as a file: in Play Console, App content → Data safety → Export to CSV, and save
-it as `storeautopilot/data_safety.csv` in your repository. From then on it is uploaded whenever it changes.
+| Where | What |
+|---|---|
+| App Store Connect | Create the app record; fill in App Privacy; put the privacy policy and support pages online; agreements, tax and banking for in-app purchases |
+| Play Console | Create the app; upload the first bundle by hand (turns on Play App Signing); fill in the App content forms. Personal accounts created after November 2023 need a 14-day closed test with 12 testers before production |
+| Xcode | Sign in with your Apple account once |
 
-### 7. Do the store steps that have no API
-
-Some things can only be done by hand, once:
-
-- **App Store Connect:** create the app record (name, bundle ID, SKU, language); fill in the App Privacy labels; put
-  your privacy policy and support pages online; sign the agreements and fill in tax and banking if you sell in-app
-  purchases.
-- **Play Console:** create the app; upload the first app bundle by hand (this turns on Play App Signing); fill in the
-  App content forms (content rating, target audience, ads, data safety). Personal developer accounts created after
-  November 2023 have to run a 14-day closed test with at least 12 testers before they can publish to production.
-- **Xcode:** sign in with your Apple account once, so automatic signing works.
-
-### 8. Check and connect the runner
+### 8. Check and connect your Mac
 
     storeautopilot doctor --online
     storeautopilot runner install
 
-`--online` also signs in to App Store Connect and Google Play with your keys and checks that the app records exist,
-that the version in `pubspec.yaml` can still take builds, and whether the first Android upload has been done. It
-takes about half a minute.
-
-`runner install` downloads the official GitHub Actions runner, verifies its checksum, registers it for this repository
-only and starts it as a background service. It refuses to do this for a public repository.
+`--online` also signs in to both stores and checks the app records, the version and the first Android upload.
+`runner install` downloads GitHub's runner, verifies its checksum, registers it for this repository only and starts
+it in the background. It refuses to do so for a public repository.
 
 ## Releasing
 
     git push origin HEAD:release
 
-Your Mac must be awake and online. You can follow the run under the repository's Actions tab, and you get a macOS
-notification when it finishes or fails. The run's summary page lists every step with its duration, or what failed and
-how to fix it. After that, the build is in TestFlight and on your Play track, and the store pages show the new text
-and screenshots.
+Keep the Mac awake and online. Follow the run under the repository's Actions tab; a macOS notification tells you when
+it finished. Then the build is in TestFlight and on your Play track, and the store pages show the new text and images.
 
-To see where things stand in both stores at any time — live version, version in review, newest builds, Apple's
-processing result for the last upload (with the reason if it was rejected), Play tracks:
-
-    storeautopilot status
-
-And what users are saying, newest first in both stores, with an id to answer the ones without a reply:
-
-    storeautopilot reviews
-    storeautopilot reviews reply ios:1234567890 "Thanks! Fixed in 1.2.4."
-
-Screenshots are taken again only when the app itself changed. If only `store.md` or the version number changed, the
-screenshots from the last run are reused, which saves a few minutes.
-
-To try a release without the push, or to see what it would do:
-
-    storeautopilot release --dry-run
-    storeautopilot release --only android
-    storeautopilot release --skip-shots      # keep the screenshots already in the stores
-    storeautopilot release --fresh-shots     # take new screenshots even if the app didn't change
+| To… | Run |
+|---|---|
+| see what a release would do | `storeautopilot release --dry-run` |
+| release one platform | `storeautopilot release --only android` |
+| keep the screenshots already in the stores | `storeautopilot release --skip-shots` |
+| see both stores at a glance | `storeautopilot status` |
+| read and answer reviews | `storeautopilot reviews`, `storeautopilot reviews reply ios:123 "Thanks!"` |
 
 ## Going live
 
-When the build has been tested: on GitHub, open Actions → Store → Run workflow and tick **submit for review**. Or run:
+When the build has been tested, on GitHub open Actions → Store → Run workflow and tick **submit for review**, or run:
 
     storeautopilot submit
 
-Before submitting anything, it checks that App Review has what it needs for this version: a processed build,
-screenshots for every language (and iPad if the app runs on iPad), a privacy policy URL, a review contact, the age
-rating answers, and whether the app shows third-party content (`third_party_content: false` in `store.md` answers
-that for you). If something is missing it lists all of it and submits nothing. `storeautopilot submit --dry-run` runs
-only the check.
+The latest TestFlight build of the current version goes to App Review, and the newest release on your Play track is
+promoted to production. After Apple approves, you release the version in App Store Connect.
 
-This submits the latest TestFlight build of the current version for App Store review and promotes the newest release
-on your Play track to production. After Apple approves the version, you release it in App Store Connect; with
-`phased_release: true` it then reaches users gradually over seven days.
-
-With `rollout: 20` under `android`, Google Play production starts with 20% of users. When nothing has gone wrong,
-widen it, and finish at 100:
+With `android.rollout` set, production starts with that share of users. Widen it when all is well:
 
     storeautopilot rollout 50
     storeautopilot rollout 100
 
-Before widening, the crash rate of the new version is checked in Google Play's vitals; a version that crashes clearly
-more than the one before is not widened. The workflow from `init` also runs `storeautopilot rollout watch` every six
-hours: it halts the staged rollout when the new version's crash rate goes above `halt_crash_rate` (1.09% by default,
-Google's own "bad behavior" line) or above three times the previous version's. This needs the Google Play Developer
-Reporting API enabled in the Google Cloud project of your service account.
+## Optional features
+
+Everything beyond the basics is off until you turn it on in `storeautopilot.yml`:
+
+```yaml
+features:
+  store_check: true
+  submit_check: true
+```
+
+| Feature | What it does |
+|---|---|
+| `store_check` | Before building, checks both stores: stops if this version is already live or waiting for release, or the app record is missing |
+| `store_requirements` | Stops when a store rule in force isn't met: Play target SDK 36 (since Aug 31, 2026), Xcode 26, iOS 13 minimum |
+| `review_risks` | Stops on problems that crash the app or get it rejected: missing AdMob app id, tracking without its prompt text; warns about missing permission texts, account deletion, privacy manifest |
+| `text_advice` | Points out keywords already in the name, spaces after commas, unused keyword room, long captions, example URLs |
+| `privacy_check` | `doctor` compares your privacy declaration with the packages you use |
+| `submit_check` | Before submitting, checks everything App Review needs: processed build, screenshots, privacy URL, contact, age rating answers |
+| `reuse_screenshots` | Skips capturing when the app hasn't changed since the last capture, which saves a few minutes |
+| `resume` | Re-running a failed release of the same commit skips builds that already reached the stores |
+| `retries` | Tries store checks and listing updates again after a passing API error (never build uploads) |
+| `job_summary` | Writes each step with its duration, or what failed and how to fix it, on the GitHub run page |
+| `rollout_guard` | Checks the crash rate in Play's vitals before widening a rollout; `storeautopilot rollout watch` halts a staged rollout whose crash rate passes `android.halt_crash_rate` (1.09% by default) |
+| `data_safety_upload` | Uploads `storeautopilot/data_safety.csv`, exported once from Play Console, whenever it changes |
+| `api_upload` | Experimental: uploads iOS builds through the App Store Connect API instead of Apple's upload tool |
+
+`storeautopilot doctor` lists which features are on.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `storeautopilot init` | Adds the StoreAutopilot files to an app repository |
-| `storeautopilot import` | Writes `store.md` from the text already in both stores |
-| `storeautopilot doctor` | Checks tools, settings, store text, keys, repository safety and the runner; `--online` also checks both stores |
-| `storeautopilot status` | Shows what App Store Connect and Google Play hold for the app |
-| `storeautopilot reviews` | Newest reviews in both stores; `reviews reply` answers one |
-| `storeautopilot privacy` | Shows what to tick in App Privacy and Data safety, from `store.md` |
-| `storeautopilot shots` | Captures and composes the store images locally and opens the preview |
-| `storeautopilot preview` | Opens the store preview with the last images |
-| `storeautopilot release` | Builds, uploads and updates the store listings |
-| `storeautopilot submit` | Sends the release for App Store review and to Google Play production |
-| `storeautopilot rollout 50` | Widens a staged Google Play rollout; 100 finishes it |
-| `storeautopilot rollout watch` | Halts a staged Google Play rollout whose crash rate is too high |
-| `storeautopilot runner install` | Connects this Mac to the repository as its runner |
+| `init` | Adds the StoreAutopilot files to an app repository |
+| `import` | Writes `store.md` from the text already in both stores |
+| `doctor` | Checks tools, settings, store text, keys, repository safety and the runner (`--online`: the stores too) |
+| `privacy` | Shows what to tick in App Privacy and Data safety |
+| `status` | Shows what App Store Connect and Google Play hold for the app |
+| `reviews` | Newest reviews from both stores; `reviews reply` answers one |
+| `shots` | Takes the screenshots, makes the store images and opens the preview |
+| `preview` | Opens the preview with the last images |
+| `release` | Builds, uploads and updates the store listings |
+| `submit` | Sends the version to App Review and promotes Google Play to production |
+| `rollout 50` | Widens a staged Google Play rollout; 100 finishes it (`rollout watch` with `rollout_guard`) |
+| `runner install` | Connects this Mac to the repository as its runner |
 
-Options: `--config PATH`, `--only ios|android`, `--skip-shots` (release), `--fresh-shots` (release and shots),
-`--dry-run` (release, submit and rollout), `--online` (doctor).
+Options: `--config PATH`, `--only ios|android`, `--dry-run`, `--skip-shots`, `--fresh-shots`, `--online`, `--version`.
 
-## Changing the look of the store images
+## Store images
 
-The images come from `storeautopilot/frame.html` (screenshots) and `storeautopilot/feature.html` (the Play feature
-graphic) in your repository. They are plain HTML and CSS. These placeholders are filled in:
+The images come from `storeautopilot/frame.html` and `storeautopilot/feature.html` in your repository: plain HTML and
+CSS, filled in with these values:
 
-- `frame.html`: `{{caption}}`, `{{screenshot}}`, `{{platform}}` (`ios`, `ipad` or `android`)
-- `feature.html`: `{{name}}`, `{{tagline}}`
-- both: `{{background}}`, `{{text}}`, `{{accent}}`, `{{font}}`, `{{width}}`, `{{height}}`
+| Template | Values |
+|---|---|
+| `frame.html` | `{{caption}}`, `{{screenshot}}`, `{{platform}}` (`ios`, `ipad` or `android`) |
+| `feature.html` | `{{name}}`, `{{tagline}}` |
+| both | `{{background}}`, `{{text}}`, `{{accent}}`, `{{font}}`, `{{width}}`, `{{height}}` |
 
-Run `storeautopilot shots` to see your changes. Output sizes are 1320×2868 for the 6.9" iPhone and 2064×2752 for the
-13" iPad on the App Store, 1080×1920 for Google Play phone screenshots and 1024×500 for the feature graphic.
+| Image | Size |
+|---|---|
+| App Store, 6.9" iPhone | 1320 × 2868 |
+| App Store, 13" iPad | 2064 × 2752 |
+| Google Play, phone | 1080 × 1920 |
+| Google Play, feature graphic | 1024 × 500 |
+
+<p align="center"><img src="docs/images/feature-graphic.jpg" width="512" alt="Google Play feature graphic"></p>
 
 ## When something goes wrong
 
-Every command writes a log to `~/Library/Logs/StoreAutopilot/` with everything it printed and the full output of
-Flutter, Xcode and fastlane. The last 30 logs are kept. When something fails you see one line saying what went wrong,
-a hint on how to fix it, and the path of the log.
+Every command keeps a log in `~/Library/Logs/StoreAutopilot/`, with everything it printed and the full output of
+Flutter, Xcode and fastlane; the last 30 are kept. A failure shows one line saying what went wrong, a hint on how to
+fix it, and where the log is.
 
-Most setup problems are caught by `storeautopilot doctor --online` before you push. It also looks for what gets apps
-rejected most often, as far as the project shows it:
+A few things keep an unattended run from going badly:
 
-- **Store rules that change over time:** Google Play's target SDK (API 36 since August 31, 2026), Xcode 26 or later,
-  iOS 13 or later. A rule already in force stops the release before the build; an upcoming one is a warning with its
-  date.
-- **Crashes on launch or first use:** a missing AdMob app id (iOS and Android), missing permission texts for camera,
-  photos, location, Face ID and similar packages, tracking declared without its prompt text.
-- **Account deletion:** with a sign-in package, Apple requires deleting the account inside the app; `doctor` reminds
-  you to say where in `review_notes`.
-- **Privacy manifest:** a note when `ios/Runner/PrivacyInfo.xcprivacy` is missing.
-
-During a run:
-
-- **A stuck command is stopped.** No command waits for keyboard input, and one that prints nothing for 30 minutes
-  (an app frozen in its screenshot test, say) is stopped with everything it started, so the runner is free again.
-- **Passing store errors are retried.** Store checks and listing updates are tried again after a short wait. Build
-  uploads are never repeated automatically.
-- **A re-run continues where the last one stopped.** If iOS reached TestFlight and Android then failed, use Re-run
-  on the GitHub run: iOS is not built or uploaded again, and Android gets the same build number. This works for the
-  same commit; a new commit, or local uncommitted changes, always builds everything.
+- No command waits for keyboard input, and one that prints nothing for 30 minutes (an app frozen in its screenshot
+  test, say) is stopped together with everything it started.
+- A release stops early when the disk has less than 5 GB free.
+- Problems with the setup, keys or store text are reported before anything is built.
 
 ## Security
 
-- Keys stay in `~/.storeautopilot/<app_id>/`, readable only by you. Only their file paths are passed to fastlane; their
-  contents are never printed or logged.
-- The runner serves one private repository. The workflow runs only on pushes and manual starts, never on pull
-  requests, so nobody else's code runs on your Mac. `doctor` fails if a pull request trigger is added.
-- `doctor` fails if keys, keystores or service account files are committed to git.
+- **Keys** live in `~/.storeautopilot/<app_id>/`, readable only by you. Only their file paths are handed to fastlane;
+  their contents are never printed or logged. The App Review demo password is written to a private work folder for
+  the upload and removed right after.
+- **Your Mac runs the workflow.** Anyone who can push to the repository can run code on it, so keep the repository
+  private and give push access only to people you trust. StoreAutopilot's runner serves one private repository, the
+  workflow runs only on pushes, manual starts and (if you enable it) a schedule — never on pull requests — and
+  `doctor` fails if a pull request trigger is added.
+- **Nothing secret goes into git:** `init` adds ignore rules and `doctor` fails if keys, keystores or service account
+  files are committed.
+- **Logs** are readable only by you. They hold build output and store text, never keys.
 - Android bundles signed with the debug key are refused before upload.
-
-## Built with
-
-- [fastlane](https://fastlane.tools) for everything that talks to the stores: `deliver` and `pilot` for App Store
-  Connect, `supply` for Google Play, `gym` for the iOS build
-- App Store Connect API keys, so no Apple ID password or two-factor prompts are needed
-- Xcode automatic signing (`-allowProvisioningUpdates`) with the same API key, so no certificates to manage
-- Flutter `integration_test` and `flutter drive` for the screenshots, on an iPhone simulator and an Android emulator
-- Headless Google Chrome to turn the HTML templates into images
-- GitHub Actions with a self-hosted runner on your Mac
-- Plain Ruby for the tool itself, with no gems beyond fastlane
 
 ## Limitations
 
-- Flutter apps only.
-- Runs on macOS only, and the Mac has to be on when you push.
-- No Android tablet screenshots. Google Play doesn't require them, but tablet users won't see any.
-- App Privacy labels and Play's App content forms have no API and stay manual.
+- Flutter apps only, built on macOS; the Mac has to be on when you push.
+- No Android tablet screenshots (Google Play doesn't require them).
+- App Privacy and Play's Data safety form have no API for filling them in; `storeautopilot privacy` tells you what
+  to tick.
+
+## Built with
+
+| Part | Used for |
+|---|---|
+| [fastlane](https://fastlane.tools) | Talking to the stores: `deliver`, `pilot` and `gym` for Apple, `supply` for Google Play |
+| App Store Connect API key | Signing in to Apple without a password or two-factor prompts; also used by Xcode's automatic signing |
+| Flutter `integration_test` | The screenshots, on an iPhone and iPad simulator and an Android emulator |
+| Headless Google Chrome | Turning the HTML templates into store images |
+| GitHub Actions with a self-hosted runner | Running releases on your Mac |
+| Ruby | The tool itself, with no gems beyond fastlane |
 
 ## Development
 
     bin/test
 
-The tests need nothing but Ruby: external commands and fastlane are replaced by fakes. They run on every push and
-pull request on GitHub's hosted Linux machines, with the oldest and newest supported Ruby.
+The tests need nothing but Ruby; external commands and fastlane are replaced by fakes. They run on every push and
+pull request on GitHub's hosted Linux machines with Ruby 3.1 and 3.4.
 
 ## License
 
