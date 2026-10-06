@@ -16,6 +16,8 @@ module StoreAutopilot
       @secrets = Secrets.new(config.app_id, home: home)
       @state = State.new(@secrets.state_path)
       @work = Pipeline.work_dir(home, config.app_id)
+      FileUtils.mkdir_p(@work)
+      File.chmod(0o700, @work) # builds, store text and (briefly) the review demo password live here
       @fastlane = Fastlane.new(shell: shell, workdir: @work)
       @builder = Builder.new(config: config, shell: shell)
       @screenshots = screenshots || Screenshots.new(config: config, shell: shell)
@@ -431,6 +433,8 @@ module StoreAutopilot
                      retries: retries(1))
       @state.record("ios_text", text_digest) if text
       @state.record("ios_shots", shots_digest) if images
+    ensure
+      FileUtils.rm_f(File.join(store_dir, "ios", "metadata", "review_information", "demo_password.txt"))
     end
 
     # The bundle goes up with its release notes (changelogs in the metadata folder).

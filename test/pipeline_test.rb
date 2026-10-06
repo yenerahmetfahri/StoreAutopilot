@@ -299,6 +299,32 @@ class PipelineTest < Minitest::Test
     end
   end
 
+  # The demo password is sent with the listing and then removed from the work folder; the folder is private.
+  def test_demo_password_does_not_stay_on_disk
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      secrets = make_secrets(home)
+      File.write(File.join(secrets, "review_demo_password.txt"), "pw123\n")
+      md = Fixtures::VALID_MD.sub("---\n", "---\nreview_demo_user: rev@example.com\n")
+      config = StoreAutopilot::Config.load(make_app(dir, store_md: md))
+      seen = nil
+      shell = fake_shell
+      inner = shell.instance_variable_get(:@on_run)
+      shell.on_run do |cmd, env|
+        if cmd[2] == "metadata"
+          meta = JSON.parse(File.read(env["STOREAUTOPILOT_JOB"]))["metadata_path"]
+          seen = File.read(File.join(meta, "review_information", "demo_password.txt"))
+        end
+        inner.call(cmd, env)
+      end
+      pipeline = StoreAutopilot::Pipeline.new(config: config, shell: shell, platforms: [:ios], skip_shots: true, home: home)
+      pipeline.release
+      assert_equal "pw123\n", seen
+      assert_empty Dir.glob(File.join(pipeline.work_dir, "**", "demo_password.txt"))
+      assert_equal 0o700, File.stat(pipeline.work_dir).mode & 0o777
+    end
+  end
+
   def test_dry_run_touches_nothing
     Dir.mktmpdir do |dir|
       home = File.join(dir, "home")
