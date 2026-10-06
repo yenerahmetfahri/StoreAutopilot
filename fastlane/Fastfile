@@ -55,7 +55,7 @@ def asc_api(method, path, body = nil)
   require "net/http"
   token = Spaceship::ConnectAPI::Token.create(key_id: asc["key_id"], issuer_id: asc["issuer_id"], filepath: job["asc_key"])
   uri = URI("https://api.appstoreconnect.apple.com/v1/#{path}")
-  request = (method == :post ? Net::HTTP::Post : Net::HTTP::Get).new(uri)
+  request = { get: Net::HTTP::Get, post: Net::HTTP::Post, patch: Net::HTTP::Patch }.fetch(method).new(uri)
   request["Authorization"] = "Bearer #{token.text}"
   request["Content-Type"] = "application/json"
   request.body = JSON.generate(body) if body
@@ -63,6 +63,52 @@ def asc_api(method, path, body = nil)
   data = response.body.to_s.empty? ? {} : JSON.parse(response.body)
   UI.user_error!(data.dig("errors", 0, "detail") || "HTTP #{response.code}") unless response.is_a?(Net::HTTPSuccess)
   data
+end
+
+# Uploads an .ipa through the App Store Connect API (buildUploads), the way Apple's upload tool does it: reserve the
+# upload, send the parts to the URLs Apple returns, commit with an MD5 checksum, then wait for Apple's verdict.
+def api_upload_ipa(app, ipa, version:, build:)
+  require "digest"
+  upload = asc_api(:post, "buildUploads", { data: { type: "buildUploads",
+    attributes: { cfBundleShortVersionString: version, cfBundleVersion: build, platform: "IOS" },
+    relationships: { app: { data: { type: "apps", id: app.id } } } } })["data"]
+  file = asc_api(:post, "buildUploadFiles", { data: { type: "buildUploadFiles",
+    attributes: { assetType: "ASSET", fileName: File.basename(ipa), fileSize: File.size(ipa), uti: "com.apple.ipa" },
+    relationships: { buildUpload: { data: { type: "buildUploads", id: upload["id"] } } } } })["data"]
+  operations = Array(file.dig("attributes", "uploadOperations"))
+  UI.message("Uploading #{File.basename(ipa)} (#{(File.size(ipa) / 1_048_576.0).round(1)} MB) in #{operations.size} part(s)")
+  operations.each { |op| upload_part(op, ipa) }
+  asc_api(:patch, "buildUploadFiles/#{file['id']}", { data: { type: "buildUploadFiles", id: file["id"],
+    attributes: { uploaded: true, sourceFileChecksums: { file: { hash: Digest::MD5.file(ipa).hexdigest, algorithm: "MD5" } } } } })
+  wait_for_build_upload(upload["id"])
+end
+
+# One part of an upload, exactly as App Store Connect described it (method, URL, headers, byte range).
+def upload_part(op, path)
+  require "net/http"
+  uri = URI(op["url"])
+  request = Net::HTTP.const_get(op["method"].to_s.capitalize).new(uri)
+  Array(op["requestHeaders"]).each { |h| request[h["name"]] = h["value"] }
+  request.body = File.open(path, "rb") { |f| f.seek(op["offset"].to_i) && f.read(op["length"].to_i) }
+  response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", read_timeout: 600) { |http| http.request(request) }
+  UI.user_error!("Upload part at byte #{op['offset']} failed: HTTP #{response.code}") unless response.is_a?(Net::HTTPSuccess)
+end
+
+def wait_for_build_upload(id, timeout: 1800, every: 15)
+  deadline = Time.now + timeout
+  loop do
+    state = asc_api(:get, "buildUploads/#{id}").dig("data", "attributes", "state") || {}
+    case state["state"]
+    when "COMPLETE"
+      return UI.success("App Store Connect accepted the upload")
+    when "FAILED"
+      reasons = Array(state["errors"]).map { |e| e["description"] || e["code"] }.compact
+      UI.user_error!("App Store Connect rejected the upload: #{reasons.join('; ').then { |r| r.empty? ? 'no reason given' : r }}")
+    end
+    UI.user_error!("App Store Connect is still checking the upload after #{timeout / 60} minutes") if Time.now > deadline
+    UI.message("Upload state: #{state['state'] || 'unknown'}; checking again in #{every}s")
+    sleep(every)
+  end
 end
 
 # Google's API client with play.json, through supply.
@@ -149,9 +195,18 @@ platform :ios do
               xcargs: xcode_auth_args) # gym also passes xcargs to -exportArchive; export_xcargs would duplicate them
     # With notes, pilot waits until the build shows up in App Store Connect (not for processing) to set "What to Test".
     notes = job["testflight_notes"] || {}
-    upload_to_testflight(ipa: File.join(job["build_dir"], "app.ipa"), skip_waiting_for_build_processing: true,
-                         changelog: notes.values.first,
-                         localized_build_info: (notes.transform_values { |text| { whats_new: text } } if notes.any?))
+    ipa = File.join(job["build_dir"], "app.ipa")
+    if job["api_upload"]
+      api_upload_ipa(Spaceship::ConnectAPI::App.find(job["bundle_id"]), ipa, version: job["version"], build: job["build_number"].to_s)
+      if notes.any? # the build is uploaded already; pilot only sets "What to Test"
+        upload_to_testflight(app_identifier: job["bundle_id"], distribute_only: true, app_version: job["version"],
+                             build_number: job["build_number"].to_s, skip_waiting_for_build_processing: true,
+                             changelog: notes.values.first, localized_build_info: notes.transform_values { |text| { whats_new: text } })
+      end
+    else
+      upload_to_testflight(ipa: ipa, skip_waiting_for_build_processing: true, changelog: notes.values.first,
+                           localized_build_info: (notes.transform_values { |text| { whats_new: text } } if notes.any?))
+    end
   end
 
   lane :metadata do

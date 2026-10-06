@@ -411,7 +411,9 @@ module StoreAutopilot
       UI.step("iOS: build and upload to TestFlight")
       workspace = @builder.ios(build_number: number)
       notes = @config.ios[:testflight_notes] ? listing.testflight_notes(@config) : {}
-      @fastlane.lane(:ios, :upload, ios_job(workspace: workspace, build_dir: File.join(@work, "build"), testflight_notes: notes))
+      @fastlane.lane(:ios, :upload, ios_job(workspace: workspace, build_dir: File.join(@work, "build"), testflight_notes: notes,
+                                            api_upload: @config.feature?(:api_upload), version: @config.version_name,
+                                            build_number: number))
     end
 
     def listing_ios(listing)

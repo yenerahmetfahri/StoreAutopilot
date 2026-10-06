@@ -1,4 +1,5 @@
 require "test_helper"
+require "digest"
 
 # Loads the real Fastfile with fastlane's DSL and actions replaced by recorders, so lane logic runs without fastlane.
 class FastfileHarness
@@ -6,6 +7,7 @@ class FastfileHarness
 
   module UI
     def self.message(_text) = nil
+    def self.success(_text) = nil
     def self.user_error!(text) = raise(UserError, text)
   end
 
@@ -289,5 +291,73 @@ class FastfileReadinessTest < Minitest::Test
     (questions - %i[messaging_and_chat user_generated_content]).each { |q| age[q] = "NONE" }
     assert_equal %i[messaging_and_chat user_generated_content], lanes.unanswered_age_questions(age)
     assert_equal questions, lanes.unanswered_age_questions(nil)
+  end
+end
+
+# The App Store Connect upload API, with the network replaced by recorders.
+class FastfileApiUploadTest < Minitest::Test
+  def lanes_with_api(states: %w[PROCESSING COMPLETE], errors: [])
+    lanes = FastfileHarness.new
+    FastfileHarness::Spaceship::ConnectAPI::App.found = Struct.new(:id).new("APP1")
+    calls = []
+    parts = []
+    lanes.define_singleton_method(:asc_api) do |method, path, body = nil|
+      calls << [method, path, body]
+      case [method, path]
+      in [:post, "buildUploads"] then { "data" => { "id" => "U1" } }
+      in [:post, "buildUploadFiles"]
+        { "data" => { "id" => "F1", "attributes" => { "uploadOperations" => [
+          { "method" => "PUT", "url" => "https://up/1", "offset" => 0, "length" => 4, "requestHeaders" => [{ "name" => "X", "value" => "1" }] },
+          { "method" => "PUT", "url" => "https://up/2", "offset" => 4, "length" => 3 }
+        ] } } }
+      in [:get, "buildUploads/U1"]
+        state = states.shift
+        { "data" => { "attributes" => { "state" => { "state" => state, "errors" => (state == "FAILED" ? errors : []) } } } }
+      else {}
+      end
+    end
+    lanes.define_singleton_method(:upload_part) { |op, path| parts << File.binread(path, op["length"], op["offset"]) }
+    lanes.define_singleton_method(:sleep) { |_| nil }
+    [lanes, calls, parts]
+  end
+
+  def upload(lanes, notes: {})
+    Dir.mktmpdir do |dir|
+      File.binwrite(File.join(dir, "app.ipa"), "IPADATA")
+      lanes.run(:ios, :upload, { bundle_id: "com.example.demo", workspace: "/w", build_dir: dir, api_upload: true,
+                                 version: "1.2.0", build_number: 9, testflight_notes: notes })
+    end
+  end
+
+  def teardown = FastfileHarness::Spaceship::ConnectAPI::App.found = nil
+
+  def test_uploads_in_parts_and_commits_with_checksum
+    lanes, calls, parts = lanes_with_api
+    upload(lanes)
+    reserve = calls.find { |m, p, _| m == :post && p == "buildUploads" }[2]
+    assert_equal({ cfBundleShortVersionString: "1.2.0", cfBundleVersion: "9", platform: "IOS" }, reserve[:data][:attributes])
+    assert_equal "APP1", reserve.dig(:data, :relationships, :app, :data, :id)
+    file = calls.find { |m, p, _| m == :post && p == "buildUploadFiles" }[2]
+    assert_equal({ assetType: "ASSET", fileName: "app.ipa", fileSize: 7, uti: "com.apple.ipa" }, file[:data][:attributes])
+    assert_equal %w[IPAD ATA], parts
+    commit = calls.find { |m, _, _| m == :patch }
+    assert_equal "buildUploadFiles/F1", commit[1]
+    assert_equal({ uploaded: true, sourceFileChecksums: { file: { hash: Digest::MD5.hexdigest("IPADATA"), algorithm: "MD5" } } },
+                 commit[2][:data][:attributes])
+    assert_empty lanes.called(:upload_to_testflight) # Apple's upload tool is not used
+  end
+
+  def test_rejected_upload_explains_why
+    lanes, = lanes_with_api(states: %w[FAILED], errors: [{ "code" => "90189", "description" => "Redundant Binary Upload" }])
+    err = assert_raises(FastfileHarness::UserError) { upload(lanes) }
+    assert_includes err.message, "Redundant Binary Upload"
+  end
+
+  def test_notes_are_set_on_the_uploaded_build
+    lanes, = lanes_with_api
+    upload(lanes, notes: { "en-US" => "Faster start" })
+    notes = lanes.called(:upload_to_testflight).first
+    assert notes[:distribute_only]
+    assert_equal ["1.2.0", "9", "Faster start"], notes.values_at(:app_version, :build_number, :changelog)
   end
 end
