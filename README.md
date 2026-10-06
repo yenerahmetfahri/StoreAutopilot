@@ -304,6 +304,20 @@ With `android.rollout` set, production starts with that share of users. Widen it
     storeautopilot rollout 50
     storeautopilot rollout 100
 
+## Several apps
+
+StoreAutopilot keeps each app apart by its `app_id`: its own key folder, work folder and upload history. One Mac can
+release any number of apps.
+
+| Your setup | What to do |
+|---|---|
+| Each app in its own repository | Run `storeautopilot init` and `storeautopilot runner install` in each one. |
+| Several apps in one repository | Run `storeautopilot init --app apps/game` once per app (without `--app`, `init` asks which). Each app keeps its files in its own folder, gets its own workflow (`.github/workflows/store-game.yml`) and is released by pushing to its own branch: `git push origin HEAD:release-game`. One runner serves the whole repository. |
+| The same keys for all apps | Put `asc_key.p8`, `asc_key.json` and `play.json` once in `~/.storeautopilot/shared/`. A key in an app's own folder takes precedence, for an app under another Apple team or Play account. |
+
+Two releases never run on the Mac at the same time: they would fight over the same simulators and emulator. If
+another app's release or screenshot run is busy, the next one says so and waits for its turn.
+
 ## Optional features
 
 Everything beyond the basics is off until you turn it on in `storeautopilot.yml`:
@@ -349,7 +363,8 @@ features:
 | `rollout 50` | Widens a staged Google Play rollout; 100 finishes it (`rollout watch` with `rollout_guard`) |
 | `runner install` | Connects this Mac to the repository as its runner |
 
-Options: `--config PATH`, `--only ios|android`, `--dry-run`, `--skip-shots`, `--fresh-shots`, `--online`, `--version`.
+Options: `--config PATH`, `--app DIR` (init), `--only ios|android`, `--dry-run`, `--skip-shots`, `--fresh-shots`,
+`--online`, `--version`.
 
 ## Store images
 
@@ -382,6 +397,7 @@ A few things keep an unattended run from going badly:
 - No command waits for keyboard input, and one that prints nothing for 30 minutes (an app frozen in its screenshot
   test, say) is stopped together with everything it started.
 - A release stops early when the disk has less than 5 GB free.
+- Releases of different apps take turns on the Mac instead of running at once.
 - Problems with the setup, keys or store text are reported before anything is built.
 
 ## Security

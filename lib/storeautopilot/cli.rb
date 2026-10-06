@@ -29,12 +29,13 @@ module StoreAutopilot
         --fresh-shots       release/shots: capture again even if the app is unchanged
         --dry-run           release/submit: validate and print the plan only
         --online            doctor: check store access, the app records and the version
+        --app DIR           init: one app of several in this repository (its folder)
     TXT
 
     def self.start(argv) = new.start(argv)
 
     def start(argv)
-      opts = { config: "storeautopilot.yml", only: nil, dry_run: false, skip_shots: false, online: false, fresh_shots: false }
+      opts = { config: "storeautopilot.yml", only: nil, dry_run: false, skip_shots: false, online: false, fresh_shots: false, app: nil }
       parser = OptionParser.new do |o|
         o.on("--config PATH") { |v| opts[:config] = v }
         o.on("--only PLATFORM", %w[ios android]) { |v| opts[:only] = v.to_sym }
@@ -42,6 +43,7 @@ module StoreAutopilot
         o.on("--fresh-shots") { opts[:fresh_shots] = true }
         o.on("--dry-run") { opts[:dry_run] = true }
         o.on("--online") { opts[:online] = true }
+        o.on("--app DIR") { |v| opts[:app] = v }
         o.on("-h", "--help") { opts[:help] = true }
         o.on("-v", "--version") { opts[:version] = true }
       end

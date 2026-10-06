@@ -30,32 +30,40 @@ module StoreAutopilot
                     SHOPPING SOCIAL_NETWORKING SPORTS TRAVEL UTILITIES WEATHER].freeze
 
     # prompt: ask the developer (a Prompt); nil fills in placeholders to edit later.
-    def initialize(dir:, shell:, home: Dir.home, prompt: nil)
+    # dir: the repository's top folder. app: for a repository with several apps, the app's folder in it; that app's
+    # files go there and its workflow (store-<app_id>.yml, branch release-<app_id>) next to the others.
+    def initialize(dir:, shell:, home: Dir.home, prompt: nil, app: nil)
       @dir = File.expand_path(dir)
       @shell = shell
       @home = home
       @prompt = prompt
+      @app = app && app.delete_suffix("/")
     end
 
     def run
-      flutter_rel = find_flutter_project
-      flutter = File.join(@dir, flutter_rel)
+      app_dir, flutter_rel = locate
+      own = app_dir != "." # one of several apps in this repository
+      flutter = File.join(@dir, app_dir, flutter_rel)
       vars = detect(flutter).merge(flutter_project: flutter_rel)
       vars = answers(vars)
-      UI.step("Adding StoreAutopilot files")
-      copy("storeautopilot.yml", vars)
-      copy("store.md", vars)
-      copy("storeautopilot/frame.html")
-      copy("storeautopilot/feature.html")
-      copy(".github/workflows/store.yml")
-      copy("flutter/#{Screenshots::TEST}", nil, to: File.join(flutter_rel, Screenshots::TEST))
-      copy("flutter/#{Screenshots::DRIVER}", nil, to: File.join(flutter_rel, Screenshots::DRIVER))
+      branch = own ? "release-#{vars[:app_id]}" : "release"
+      vars.merge!(workflow_name: own ? "Store (#{vars[:app_id]})" : "Store", branch: branch,
+                  config_arg: own ? " --config #{app_dir}/storeautopilot.yml" : "")
+      UI.step("Adding StoreAutopilot files#{" for #{app_dir}" if own}")
+      at = ->(rel) { own ? File.join(app_dir, rel) : rel }
+      copy("storeautopilot.yml", vars, to: at.("storeautopilot.yml"))
+      copy("store.md", vars, to: at.("store.md"))
+      copy("storeautopilot/frame.html", nil, to: at.("storeautopilot/frame.html"))
+      copy("storeautopilot/feature.html", nil, to: at.("storeautopilot/feature.html"))
+      copy(".github/workflows/store.yml", vars, to: own ? ".github/workflows/store-#{vars[:app_id]}.yml" : ".github/workflows/store.yml")
+      copy("flutter/#{Screenshots::TEST}", nil, to: at.(File.join(flutter_rel, Screenshots::TEST)))
+      copy("flutter/#{Screenshots::DRIVER}", nil, to: at.(File.join(flutter_rel, Screenshots::DRIVER)))
       add_dev_dependencies(flutter)
       update_gitignore
       secrets = Secrets.new(vars[:app_id], home: @home)
       secrets.ensure_dir!
       UI.ok("secret folder #{secrets.dir} (private)")
-      next_steps(secrets)
+      next_steps(secrets, branch, own ? app_dir : nil)
     end
 
     private
@@ -104,11 +112,32 @@ module StoreAutopilot
       a
     end
 
-    def find_flutter_project
-      return "." if File.file?(File.join(@dir, "pubspec.yaml"))
-      found = Dir.children(@dir).sort.find { |c| File.file?(File.join(@dir, c, "pubspec.yaml")) }
-      raise Error.new("No Flutter project (pubspec.yaml) found here or one folder down.", hint: "Run init in your app repo root.") unless found
-      found
+    # [app folder relative to the repository ("." for a one-app repository), Flutter project relative to it]
+    def locate
+      if @app
+        unless File.file?(File.join(@dir, @app, "pubspec.yaml"))
+          raise Error.new("No Flutter project (pubspec.yaml) in #{@app}.", hint: "Give the app's folder, relative to the repository root.")
+        end
+        return [@app == "." ? "." : @app, "."]
+      end
+      return [".", "."] if File.file?(File.join(@dir, "pubspec.yaml"))
+      found = Dir.glob("{*,*/*}/pubspec.yaml", base: @dir).map { |p| File.dirname(p) }
+                 .reject { |d| d.split("/").any? { |part| part.start_with?(".") || %w[build example ios android].include?(part) } }.sort
+      raise Error.new("No Flutter project (pubspec.yaml) found here or below.", hint: "Run init in your app repo root.") if found.empty?
+      return [".", found.first] if found.size == 1 # one app in a subfolder: settings stay at the top
+      choose_app(found)
+    end
+
+    def choose_app(found)
+      unless @prompt
+        raise Error.new("This repository has several Flutter apps: #{found.join(', ')}.",
+                        hint: "Run `storeautopilot init --app <folder>` once for each app you want to release.")
+      end
+      UI.step("This repository has several Flutter apps")
+      found.each_with_index { |d, i| UI.info("#{i + 1}. #{d}") }
+      choice = @prompt.ask("Which one now? (run init again for the others)", default: "1").to_i
+      raise Error.new("No such app.", hint: "Pick a number from the list.") unless choice.between?(1, found.size)
+      [found[choice - 1], "."]
     end
 
     def detect(flutter)
@@ -150,15 +179,15 @@ module StoreAutopilot
       UI.ok("added key/credential rules to .gitignore")
     end
 
-    def next_steps(secrets)
+    def next_steps(secrets, branch, app_dir)
       UI.step("Next")
-      UI.info("1. Edit storeautopilot.yml and store.md")
+      UI.info("1. Edit #{app_dir ? "#{app_dir}/" : ''}storeautopilot.yml and store.md")
       UI.info("2. Fill in #{Screenshots::TEST} (navigate to each screen)")
       UI.info("3. Put your keys in #{secrets.dir}: asc_key.p8, asc_key.json, play.json")
       UI.info("   (keys all your apps use can go once in #{secrets.shared})")
       UI.info("4. storeautopilot doctor")
       UI.info("5. storeautopilot shots   (preview screenshots)")
-      UI.info("6. storeautopilot runner install, then push to the `release` branch")
+      UI.info("6. storeautopilot runner install#{" --config #{app_dir}/storeautopilot.yml" if app_dir}, then push to the `#{branch}` branch")
     end
   end
 end

@@ -76,6 +76,19 @@ module StoreAutopilot
     def platforms = [(:ios if ios?), (:android if android?)].compact
     def listing_path = File.join(root, "store.md")
 
+    # The repository's top folder: root itself for one app per repository, above it when several apps share one.
+    def git_root
+      dir = root
+      dir = File.dirname(dir) until File.exist?(File.join(dir, ".git")) || File.dirname(dir) == dir
+      File.exist?(File.join(dir, ".git")) ? dir : root
+    end
+
+    def monorepo? = git_root != root
+
+    # The workflow and the branch that release this app; per app when several share a repository.
+    def workflow_file = File.join(git_root, ".github", "workflows", monorepo? ? "store-#{app_id}.yml" : "store.yml")
+    def release_branch = monorepo? ? "release-#{app_id}" : "release"
+
     # The app's own template if present, else the built-in one.
     def template_path(name)
       own = File.join(root, "storeautopilot", name)

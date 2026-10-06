@@ -14,7 +14,7 @@ module StoreAutopilot
                    dry_run: opts[:dry_run], skip_shots: opts[:skip_shots], fresh_shots: opts[:fresh_shots], home: home)
     end
 
-    def init(_args, _opts) = Init.new(dir: Dir.pwd, shell: shell, home: home, prompt: ($stdin.tty? ? Prompt.new : nil)).run
+    def init(_args, opts) = Init.new(dir: Dir.pwd, shell: shell, home: home, prompt: ($stdin.tty? ? Prompt.new : nil), app: opts[:app]).run
 
     def import(_args, opts)
       c = config(opts)

@@ -1,10 +1,10 @@
 # StoreAutopilot: runs only on this repo's own Mac runner.
 # Only push and manual triggers — never let code from forks or PRs run on this Mac.
-name: Store
+name: {{workflow_name}}
 
 on:
   push:
-    branches: [release]
+    branches: [{{branch}}]
   workflow_dispatch:
     inputs:
       submit_for_review:
@@ -31,10 +31,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Release
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.submit_for_review)
-        run: storeautopilot release
+        run: storeautopilot release{{config_arg}}
       - name: Submit for review
         if: github.event_name == 'workflow_dispatch' && inputs.submit_for_review
-        run: storeautopilot submit
+        run: storeautopilot submit{{config_arg}}
       - name: Watch the Google Play rollout
         if: github.event_name == 'schedule'
-        run: storeautopilot rollout watch
+        run: storeautopilot rollout watch{{config_arg}}

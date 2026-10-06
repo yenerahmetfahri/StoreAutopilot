@@ -4,7 +4,6 @@ module StoreAutopilot
   class Doctor
     Check = Struct.new(:status, :message, :hint)
     SENSITIVE = /(\.p8|\.jks|\.keystore|(\A|\/)key\.properties|google-services\.json|GoogleService-Info\.plist|(\A|\/)play\.json)\z/
-    WORKFLOW = ".github/workflows/store.yml"
     MANUAL = [
       "Apple: create the app record in App Store Connect (name, bundle ID, SKU, primary language)",
       "Apple: fill in App Privacy labels; publish the privacy policy and support URLs",
@@ -60,24 +59,26 @@ module StoreAutopilot
                 Check.new(:fail, "repository is public — a self-hosted runner would run strangers' code on this Mac",
                           "Make the repo private or don't use StoreAutopilot's runner with it.")
               end
-      tracked = @shell.capture("git", "ls-files", chdir: root, allow_failure: true).lines.map(&:strip).grep(SENSITIVE)
+      tracked = @shell.capture("git", "ls-files", chdir: config.git_root, allow_failure: true).lines.map(&:strip).grep(SENSITIVE)
       tracked.each { |f| list << Check.new(:fail, "#{f} is committed to git", "git rm --cached #{f}, add it to .gitignore and rotate that key.") }
-      loose = @shell.capture("git", "ls-files", "--others", "--exclude-standard", chdir: root, allow_failure: true).lines.map(&:strip).grep(SENSITIVE)
+      loose = @shell.capture("git", "ls-files", "--others", "--exclude-standard", chdir: config.git_root, allow_failure: true).lines.map(&:strip).grep(SENSITIVE)
       loose.each { |f| list << Check.new(:warn, "#{f} is not in .gitignore", "Add it to .gitignore (storeautopilot init does this).") }
       list << Check.new(:ok, "no keys or credentials tracked by git") if tracked.empty? && loose.empty?
-      workflow = File.join(root, WORKFLOW)
+      workflow = config.workflow_file
+      shown = workflow.delete_prefix("#{config.git_root}/")
       list << if !File.file?(workflow)
-                Check.new(:fail, "#{WORKFLOW} missing", "Run `storeautopilot init`.")
+                Check.new(:fail, "#{shown} missing", "Run `storeautopilot init`#{" --app #{config.root.delete_prefix("#{config.git_root}/")}" if config.monorepo?}.")
               elsif File.read(workflow).include?("pull_request")
-                Check.new(:fail, "#{WORKFLOW} has a pull_request trigger", "Remove it: pull requests must never run on this Mac.")
+                Check.new(:fail, "#{shown} has a pull_request trigger", "Remove it: pull requests must never run on this Mac.")
               else
-                Check.new(:ok, WORKFLOW)
+                Check.new(:ok, shown)
               end
-      heads = @shell.capture("git", "ls-remote", "--heads", "origin", "release", chdir: root, allow_failure: true)
+      branch = config.release_branch
+      heads = @shell.capture("git", "ls-remote", "--heads", "origin", branch, chdir: root, allow_failure: true)
       list << if heads.strip.empty?
-                Check.new(:warn, "no `release` branch on origin yet", "Push one to trigger a release: git push origin HEAD:release")
+                Check.new(:warn, "no `#{branch}` branch on origin yet", "Push one to trigger a release: git push origin HEAD:#{branch}")
               else
-                Check.new(:ok, "`release` branch exists")
+                Check.new(:ok, "`#{branch}` branch exists")
               end
       list
     end
