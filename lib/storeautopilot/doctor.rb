@@ -35,6 +35,7 @@ module StoreAutopilot
         report("Secrets", secret_checks(config))
         report("Flutter project", flutter_checks(config))
         report("Store requirements", Requirements.new(config: config, shell: @shell).findings(config.platforms))
+        report("App Review risks", review_risks(config))
         report("Repository", repo_checks(config))
         report("GitHub runner", [runner_check(config)])
         report("Stores (online)", online_checks(config)) if @online
@@ -146,6 +147,13 @@ module StoreAutopilot
       end
       Check.new(:warn, "every TestFlight build will wait for an export compliance answer",
                 "If the app only uses encryption built into iOS (HTTPS, Keychain…), set `ios.uses_encryption: false`.")
+    end
+
+    def review_risks(config)
+      findings = Compliance.new(config: config, listing: Listing.load(config.listing_path)).findings
+      findings.empty? ? [Check.new(:ok, "nothing found")] : findings
+    rescue Error
+      [Check.new(:warn, "skipped: store.md can't be read")]
     end
 
     def privacy_checks(config, listing)

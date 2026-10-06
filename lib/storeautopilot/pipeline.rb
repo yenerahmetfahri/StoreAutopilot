@@ -28,6 +28,7 @@ module StoreAutopilot
     def release
       listing = preflight
       check_requirements
+      check_review_risks(listing)
       return plan(release_plan) if @dry_run
       notifying("Release") do
         Disk.check!(@shell, @home)
@@ -227,6 +228,14 @@ module StoreAutopilot
       findings.select { |f| f.status == :warn }.each { |f| UI.warn(f.message) }
       failed = findings.find { |f| f.status == :fail }
       raise Error.new("Not accepted by the store: #{failed.message}", hint: failed.hint) if failed
+    end
+
+    # Things that make the app crash on launch or get rejected, visible from the project (see Compliance).
+    def check_review_risks(listing)
+      findings = Compliance.new(config: @config, listing: listing, platforms: @platforms).findings
+      findings.select { |f| f.status == :warn }.each { |f| UI.warn(f.message) }
+      failed = findings.find { |f| f.status == :fail }
+      raise Error.new(failed.message, hint: failed.hint) if failed
     end
 
     def show_findings(findings)

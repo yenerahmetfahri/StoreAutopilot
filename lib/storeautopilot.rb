@@ -14,4 +14,4 @@ module StoreAutopilot
   end
 end
 
-%w[ui prompt shell env cli config listing secrets state privacy importer store_status requirements shot_inputs disk summary compose images preview devices screenshots builder fastlane pipeline doctor init runner_install commands].each { |f| require_relative "storeautopilot/#{f}" }
+%w[ui prompt shell env cli config listing secrets state privacy importer store_status requirements compliance shot_inputs disk summary compose images preview devices screenshots builder fastlane pipeline doctor init runner_install commands].each { |f| require_relative "storeautopilot/#{f}" }
