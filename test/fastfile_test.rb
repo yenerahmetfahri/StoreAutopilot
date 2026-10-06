@@ -239,6 +239,13 @@ class FastfileTest < Minitest::Test
     assert_equal "0.2", lanes.called(:upload_to_play_store).first[:rollout]
   end
 
+  def test_android_halt_keeps_the_current_share
+    lanes = FastfileHarness.new
+    lanes.run(:android, :halt, ANDROID.merge(rollout: 0.2))
+    halt = lanes.called(:upload_to_play_store).first
+    assert_equal ["production", "halted", "0.2"], halt.values_at(:track, :release_status, :rollout)
+  end
+
   def test_android_rollout_updates_production
     lanes = FastfileHarness.new
     lanes.run(:android, :rollout, ANDROID.merge(rollout: 1.0))

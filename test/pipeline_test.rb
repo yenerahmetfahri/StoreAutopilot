@@ -365,6 +365,65 @@ class PipelineTest < Minitest::Test
     end
   end
 
+  # Staged rollout at 20% of version code 12; vitals say what is given.
+  def rollout_pipeline(dir, vitals:, production: [11, 12])
+    home = File.join(dir, "home")
+    make_secrets(home)
+    yml = Fixtures::VALID_YML.sub("package: com.example.demo", "package: com.example.demo\n  rollout: 20")
+    config = StoreAutopilot::Config.load(make_app(dir, yml: yml))
+    shell = FakeShell.new("fastlane android vitals" => PipelineTest.lane_result(vitals),
+                          "fastlane android status" => PipelineTest.lane_result(tracks: { "production" => production }, errors: {}))
+    shell.on_run do |cmd, env|
+      next unless cmd[2] == "promote"
+      File.write(JSON.parse(File.read(env["STOREAUTOPILOT_JOB"]))["output"], JSON.generate(version_code: 12))
+    end
+    StoreAutopilot::Pipeline.new(config: config, shell: shell, platforms: [:android], home: home).submit
+    [StoreAutopilot::Pipeline.new(config: config, shell: shell, home: home), shell]
+  end
+
+  BAD = { versions: { "12" => { crash_rate: 0.03, users: 800 }, "11" => { crash_rate: 0.004, users: 9000 } }, through: "2026-10-05" }.freeze
+  GOOD = { versions: { "12" => { crash_rate: 0.004, users: 800 }, "11" => { crash_rate: 0.004, users: 9000 } }, through: "2026-10-05" }.freeze
+
+  def test_watch_halts_a_bad_rollout_at_its_current_share
+    Dir.mktmpdir do |dir|
+      pipeline, shell = rollout_pipeline(dir, vitals: BAD)
+      pipeline.rollout_watch
+      assert_includes lanes(shell), "android halt"
+      assert_equal 0.2, shell.jobs["android halt"]["rollout"]
+      shell.runs.clear
+      pipeline.rollout_watch # halted: nothing more to watch
+      assert_empty lanes(shell)
+    end
+  end
+
+  def test_watch_leaves_a_healthy_rollout_alone
+    Dir.mktmpdir do |dir|
+      pipeline, shell = rollout_pipeline(dir, vitals: GOOD)
+      pipeline.rollout_watch
+      refute_includes lanes(shell), "android halt"
+    end
+  end
+
+  def test_widening_is_refused_while_the_crash_rate_is_bad
+    Dir.mktmpdir do |dir|
+      pipeline, shell = rollout_pipeline(dir, vitals: BAD)
+      err = assert_raises(StoreAutopilot::Error) { pipeline.rollout(50) }
+      assert_includes err.message, "Not widening"
+      refute_includes lanes(shell), "android rollout"
+    end
+  end
+
+  def test_watch_without_a_staged_rollout_does_nothing
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      make_secrets(home)
+      shell = FakeShell.new
+      StoreAutopilot::Pipeline.new(config: StoreAutopilot::Config.load(make_app(dir)), shell: shell, home: home).rollout_watch
+      assert_empty shell.runs
+      assert_empty shell.captures
+    end
+  end
+
   def test_submit_runs_submit_and_promote
     Dir.mktmpdir do |dir|
       home = File.join(dir, "home")

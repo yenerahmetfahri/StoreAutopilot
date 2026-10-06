@@ -109,3 +109,36 @@ class StoreStatusSubmissionTest < Minitest::Test
     assert_includes finding.message, "not accepted"
   end
 end
+
+class RolloutHealthTest < Minitest::Test
+  S = StoreAutopilot::StoreStatus
+
+  def health(versions, current: 12, previous: 11, max_rate: 1.09)
+    S.rollout_health({ "versions" => versions, "through" => "2026-10-05" }, current: current, previous: previous, max_rate: max_rate)
+  end
+
+  def v(rate, users) = { "crash_rate" => rate, "users" => users }
+
+  def test_too_few_users_is_not_judged
+    assert_equal :ok, health({ "12" => v(0.5, 40) }).status
+    assert_includes health({}).message, "not enough users"
+  end
+
+  def test_above_the_play_threshold_halts
+    finding = health({ "12" => v(0.015, 500), "11" => v(0.012, 9000) })
+    assert_equal :fail, finding.status
+    assert_includes finding.message, "1.50% crash rate over 500 users (previous 1.20%)"
+  end
+
+  def test_much_worse_than_the_previous_version_halts
+    assert_equal :fail, health({ "12" => v(0.004, 500), "11" => v(0.001, 9000) }).status
+    assert_equal :ok, health({ "12" => v(0.002, 500), "11" => v(0.001, 9000) }).status # 2x but tiny
+    assert_equal :ok, health({ "12" => v(0.004, 500) }, previous: nil).status
+  end
+
+  def test_unavailable_vitals_only_warn
+    finding = S.rollout_health({ "error" => "API not enabled" }, current: 12, previous: 11, max_rate: 1.09)
+    assert_equal :warn, finding.status
+    assert_includes finding.hint, "Developer Reporting API"
+  end
+end

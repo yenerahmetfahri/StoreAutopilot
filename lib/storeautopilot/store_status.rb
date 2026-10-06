@@ -97,6 +97,28 @@ module StoreAutopilot
       list
     end
 
+    MIN_USERS = 100 # fewer users than this say little about a crash rate
+
+    # Is the version in a staged rollout healthy? vitals: the android vitals lane result; max_rate: percent.
+    # Halts above max_rate, or above 3× the previous version once past 0.3%.
+    def rollout_health(vitals, current:, previous:, max_rate:)
+      return Finding.new(:warn, "Play vitals unavailable: #{vitals['error']}", VITALS_HINT) if vitals["error"]
+      now = vitals.dig("versions", current.to_s)
+      through = vitals["through"]
+      if now.nil? || now["users"].to_i < MIN_USERS
+        return Finding.new(:ok, "version code #{current}: not enough users in vitals yet (#{now ? now['users'] : 0}, data through #{through})")
+      end
+      rate = now["crash_rate"].to_f * 100
+      before = previous && vitals.dig("versions", previous.to_s)
+      base = before && before["users"].to_i >= MIN_USERS ? before["crash_rate"].to_f * 100 : nil
+      text = "version code #{current}: #{format('%.2f', rate)}% crash rate over #{now['users']} users" \
+             "#{base ? " (previous #{format('%.2f', base)}%)" : ''}, through #{through}"
+      bad = rate > max_rate || (base && rate > 3 * base && rate > 0.3)
+      bad ? failure(text, "Fix the crash and release a new version; resume or replace the halted release in Play Console.") : Finding.new(:ok, text)
+    end
+
+    VITALS_HINT = "Enable the Google Play Developer Reporting API in the Google Cloud project of play.json's service account."
+
     def android_build_number(status) = (status["tracks"] || {}).values.flatten.map(&:to_i).max || 0
 
     # true if a is a higher version than b; unparseable versions never block a release.

@@ -30,3 +30,4 @@ android:
   # emulator: Pixel_8         # AVD name; default: the first one
   # keystore_properties: ~/Keys/{{app_id}}/key.properties
   # rollout: 20               # submit starts production with 20% of users; widen with `storeautopilot rollout 50`
+  # halt_crash_rate: 1.09     # `rollout watch` halts a staged rollout above this crash rate (percent)

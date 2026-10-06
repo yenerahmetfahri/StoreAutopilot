@@ -30,6 +30,9 @@ class InitTest < Minitest::Test
       assert File.file?(File.join(dir, "app", StoreAutopilot::Screenshots::DRIVER))
       workflow = File.read(File.join(dir, ".github/workflows/store.yml"))
       assert_includes workflow, "branches: [release]"
+      # The scheduled run only watches; it must never release or submit.
+      assert_includes workflow, "if: github.event_name == 'schedule'"
+      assert_includes workflow, "if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.submit_for_review)"
       refute_includes workflow, "pull_request"
       assert_includes File.read(File.join(dir, ".gitignore")), "*.p8"
       assert_equal 0o700, File.stat(File.join(home, ".storeautopilot", "word-game")).mode & 0o777

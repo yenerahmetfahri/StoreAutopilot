@@ -73,6 +73,7 @@ module StoreAutopilot
     end
 
     def rollout(args, opts)
+      return pipeline(opts).rollout_watch if args.first == "watch"
       percent = Float(args.first.to_s.delete_suffix("%"), exception: false)
       raise Error.new("Give the rollout percentage.", hint: "e.g. `storeautopilot rollout 50`, or 100 to finish.") unless percent
       pipeline(opts).rollout(percent % 1 == 0 ? percent.to_i : percent)

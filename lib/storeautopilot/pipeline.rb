@@ -71,6 +71,7 @@ module StoreAutopilot
           UI.step("Android: promoting #{@config.android[:track]} → production#{rollout_note}")
           out = @fastlane.lane(:android, :promote, android_job(track: @config.android[:track], rollout: @config.android[:rollout] / 100.0))
           UI.ok("Version code #{out['version_code']} promoted")
+          remember_rollout(out["version_code"], @config.android[:rollout])
         end
         "Submitted: #{@platforms.join(', ')}"
       end
@@ -107,12 +108,60 @@ module StoreAutopilot
       end
       @platforms = [:android]
       preflight
+      health = rollout_health
+      if health&.status == :fail
+        raise Error.new("Not widening the rollout: #{health.message}.", hint: "`storeautopilot rollout watch` halts it. #{health.hint}")
+      end
       return plan(["set the Google Play production rollout to #{percent}%"]) if @dry_run
       notifying("Rollout") do
         UI.step("Android: production rollout → #{percent}%")
         @fastlane.lane(:android, :rollout, android_job(rollout: percent / 100.0))
+        remember_rollout(staged_rollout&.fetch("version_code", nil), percent)
         percent >= 100 ? "Google Play rollout complete" : "Google Play rollout at #{percent}%"
       end
+    end
+
+    # For a schedule: checks the staged production rollout's crash rate and halts it when the version is clearly
+    # worse (see StoreStatus.rollout_health). Does nothing when no staged rollout is running.
+    def rollout_watch
+      raise Error.new("`rollout watch` is for Google Play; storeautopilot.yml has no android section.") unless @config.android?
+      @platforms = [:android]
+      problems = @secrets.problems(@platforms)
+      raise Error.new("Secrets are not ready: #{problems.first.first}", hint: "Run `storeautopilot doctor`.") if problems.any?
+      return UI.ok("No staged Google Play rollout running; nothing to watch.") unless staged_rollout
+      health = rollout_health
+      return unless health&.status == :fail
+      return plan(["halt the Google Play production rollout"]) if @dry_run
+      rollout = staged_rollout
+      notifying("Rollout watch") do
+        UI.step("Android: halting the production rollout")
+        @fastlane.lane(:android, :halt, android_job(rollout: rollout["percent"] / 100.0))
+        @state.record("android_rollout", rollout.merge("halted" => true))
+        "Google Play rollout of version code #{rollout['version_code']} halted: crash rate too high"
+      end
+    end
+
+    def staged_rollout
+      entry = @state["android_rollout"]
+      entry if entry && entry["percent"].to_f < 100 && !entry["halted"]
+    end
+
+    def remember_rollout(version_code, percent)
+      return @state.record("android_rollout", nil) if percent.to_f >= 100
+      @state.record("android_rollout", { "version_code" => version_code || staged_rollout&.fetch("version_code", nil), "percent" => percent })
+    end
+
+    # nil when no staged rollout is known; vitals problems become a warning, never a block.
+    def rollout_health
+      rollout = staged_rollout
+      return nil unless rollout && rollout["version_code"]
+      UI.step("Checking Google Play vitals for version code #{rollout['version_code']}")
+      status = @fastlane.lane(:android, :status, android_job, quiet: true, retries: 1)
+      codes = (status.dig("tracks", "production") || []).map(&:to_i).sort
+      previous = codes.reject { |c| c >= rollout["version_code"].to_i }.max
+      vitals = @fastlane.lane(:android, :vitals, android_job, quiet: true, retries: 1)
+      StoreStatus.rollout_health(vitals, current: rollout["version_code"], previous: previous,
+                                         max_rate: @config.android[:halt_crash_rate]).tap { |f| show_findings([f]) }
     end
 
     # Local preview: capture + compose only.

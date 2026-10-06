@@ -11,6 +11,9 @@ on:
         description: "Submit the latest build for App Store review and promote Google Play to production"
         type: boolean
         default: false
+  # Every 6 hours: halts a staged Google Play rollout whose crash rate is too high; does nothing otherwise.
+  schedule:
+    - cron: "23 */6 * * *"
 
 permissions:
   contents: read
@@ -26,8 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Release
-        if: ${{ !inputs.submit_for_review }}
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.submit_for_review)
         run: storeautopilot release
       - name: Submit for review
-        if: ${{ inputs.submit_for_review }}
+        if: github.event_name == 'workflow_dispatch' && inputs.submit_for_review
         run: storeautopilot submit
+      - name: Watch the Google Play rollout
+        if: github.event_name == 'schedule'
+        run: storeautopilot rollout watch

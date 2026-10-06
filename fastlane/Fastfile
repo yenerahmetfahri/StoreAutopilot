@@ -247,6 +247,53 @@ platform :android do
     output(version_code: code)
   end
 
+  # Crash rate and users per version code over the last week of Play's vitals (Play Developer Reporting API); read only.
+  lane :vitals do
+    reporting_errors do
+      require "googleauth"
+      require "net/http"
+      creds = File.open(job["play_json"]) do |key|
+        Google::Auth::ServiceAccountCredentials.make_creds(json_key_io: key, scope: "https://www.googleapis.com/auth/playdeveloperreporting")
+      end
+      token = creds.fetch_access_token!["access_token"]
+      base = "https://playdeveloperreporting.googleapis.com/v1beta1/apps/#{job['package']}/crashRateMetricSet"
+      call = lambda do |uri, body = nil|
+        request = body ? Net::HTTP::Post.new(uri) : Net::HTTP::Get.new(uri)
+        request["Authorization"] = "Bearer #{token}"
+        request["Content-Type"] = "application/json"
+        request.body = JSON.generate(body) if body
+        response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
+        data = JSON.parse(response.body.to_s.empty? ? "{}" : response.body)
+        UI.user_error!(data.dig("error", "message") || "HTTP #{response.code}") unless response.is_a?(Net::HTTPSuccess)
+        data
+      end
+      latest = call.(URI(base))["freshnessInfo"]["freshnesses"].find { |f| f["aggregationPeriod"] == "DAILY" }["latestEndTime"]
+      ends = Time.utc(latest["year"], latest["month"], latest["day"])
+      starts = ends - (job["days"] || 7) * 86_400
+      day = ->(t) { { year: t.year, month: t.month, day: t.day, timeZone: latest["timeZone"] } }
+      body = { timelineSpec: { aggregationPeriod: "DAILY", startTime: day.(starts), endTime: day.(ends) },
+               dimensions: ["versionCode"], metrics: %w[crashRate distinctUsers], pageSize: 1000 }
+      versions = Hash.new { |h, k| h[k] = { "crashes" => 0.0, "users" => 0.0 } }
+      Array(call.(URI("#{base}:query"), body)["rows"]).each do |row|
+        code = row["dimensions"].find { |d| d["dimension"] == "versionCode" }&.dig("stringValue")
+        metric = ->(name) { row["metrics"].find { |m| m["metric"] == name }&.dig("decimalValue", "value").to_f }
+        users = metric.("distinctUsers")
+        versions[code]["crashes"] += metric.("crashRate") * users
+        versions[code]["users"] += users
+      end
+      output(versions: versions.transform_values { |v| { crash_rate: v["users"].positive? ? v["crashes"] / v["users"] : 0.0, users: v["users"].round } },
+             through: ends.strftime("%Y-%m-%d"))
+    end
+  end
+
+  # Stops a staged production rollout; job["rollout"] keeps its current share (Play wants it on a halted release).
+  lane :halt do
+    upload_to_play_store(package_name: job["package"], json_key: job["play_json"], track: "production",
+                         release_status: "halted", rollout: job["rollout"].to_s,
+                         skip_upload_apk: true, skip_upload_aab: true, skip_upload_metadata: true,
+                         skip_upload_changelogs: true, skip_upload_images: true, skip_upload_screenshots: true)
+  end
+
   # Changes the share of users a staged production rollout reaches; 1 completes it.
   lane :rollout do
     upload_to_play_store(package_name: job["package"], json_key: job["play_json"], track: "production",

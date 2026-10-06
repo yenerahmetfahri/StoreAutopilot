@@ -130,10 +130,12 @@ module StoreAutopilot
       status = raw["release_status"] || "completed"
       problems << "android.release_status: completed or draft" unless %w[completed draft].include?(status)
       keystore = raw["keystore_properties"] && File.expand_path(raw["keystore_properties"])
+      halt = raw.fetch("halt_crash_rate", 1.09)
+      problems << "android.halt_crash_rate: a percentage, e.g. 1.09" unless halt.is_a?(Numeric) && halt.positive?
       rollout = raw.fetch("rollout", 100)
       problems << "android.rollout: a percentage above 0 and up to 100" unless Config.percent?(rollout)
       { package: package, track: raw["track"] || "internal", release_status: status,
-        emulator: raw["emulator"], keystore_properties: keystore, rollout: rollout }
+        emulator: raw["emulator"], keystore_properties: keystore, rollout: rollout, halt_crash_rate: halt }
     end
   end
 end

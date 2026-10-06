@@ -18,6 +18,7 @@ module StoreAutopilot
         release            Build, upload to TestFlight / Play, update the store listing
         submit             Submit the latest build for App Store review, promote Play to production
         rollout PERCENT    Widen a staged Google Play rollout (100 finishes it)
+        rollout watch      Halt a staged Google Play rollout whose crash rate is too high
         runner install     Register this Mac as the repo's GitHub Actions runner
 
       Options:
