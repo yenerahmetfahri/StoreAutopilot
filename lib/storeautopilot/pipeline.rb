@@ -32,28 +32,31 @@ module StoreAutopilot
       check_requirements if @config.feature?(:store_requirements)
       check_review_risks(listing) if @config.feature?(:review_risks)
       return plan(release_plan) if @dry_run
-      notifying("Release") do
-        Disk.check!(@shell, @home)
-        FileUtils.rm_rf(store_dir)
-        id = release_id
-        uploaded = @config.feature?(:resume) ? uploaded_builds(id) : {}
-        number = next_build_number
-        number = uploaded.values.max if uploaded.any? # a re-run continues with the build number already in use
-        @state.record("build_number", number)
-        UI.step("Version #{@config.version_name} (#{number})")
-        @platforms.each do |p|
-          capture_and_compose(p, listing) unless @skip_shots
-          capture_and_compose(:ipad, listing) if p == :ios && @config.ipad? && !@skip_shots
-          if uploaded.key?(p.to_s)
-            UI.step("#{p == :ios ? 'iOS' : 'Android'}: build #{number} of this commit is already uploaded; not building it again")
-          else
-            p == :ios ? upload_ios(listing, number) : upload_android(listing, number)
-            remember_upload(id, p, number)
-          end
-          p == :ios ? listing_ios(listing) : listing_android(listing, number)
+      notifying("Release") { machine_lock("release") { release_now(listing) } }
+    end
+
+    # The release itself, once this Mac is free (see MachineLock).
+    def release_now(listing)
+      Disk.check!(@shell, @home)
+      FileUtils.rm_rf(store_dir)
+      id = release_id
+      uploaded = @config.feature?(:resume) ? uploaded_builds(id) : {}
+      number = next_build_number
+      number = uploaded.values.max if uploaded.any? # a re-run continues with the build number already in use
+      @state.record("build_number", number)
+      UI.step("Version #{@config.version_name} (#{number})")
+      @platforms.each do |p|
+        capture_and_compose(p, listing) unless @skip_shots
+        capture_and_compose(:ipad, listing) if p == :ios && @config.ipad? && !@skip_shots
+        if uploaded.key?(p.to_s)
+          UI.step("#{p == :ios ? 'iOS' : 'Android'}: build #{number} of this commit is already uploaded; not building it again")
+        else
+          p == :ios ? upload_ios(listing, number) : upload_android(listing, number)
+          remember_upload(id, p, number)
         end
-        "Version #{@config.version_name} (#{number}) uploaded: #{@platforms.join(', ')}"
+        p == :ios ? listing_ios(listing) : listing_android(listing, number)
       end
+      "Version #{@config.version_name} (#{number}) uploaded: #{@platforms.join(', ')}"
     end
 
     def submit
@@ -205,11 +208,13 @@ module StoreAutopilot
     # Local preview: capture + compose only.
     def shots
       listing = Listing.load(@config.listing_path).validate!(@config)
-      Disk.check!(@shell, @home)
-      FileUtils.rm_rf(store_dir)
-      @platforms.each do |p|
-        capture_and_compose(p, listing)
-        capture_and_compose(:ipad, listing) if p == :ios && @config.ipad?
+      machine_lock("screenshots") do
+        Disk.check!(@shell, @home)
+        FileUtils.rm_rf(store_dir)
+        @platforms.each do |p|
+          capture_and_compose(p, listing)
+          capture_and_compose(:ipad, listing) if p == :ios && @config.ipad?
+        end
       end
       Preview.new(config: @config, listing: listing, store_dir: store_dir).write
     end
@@ -333,6 +338,8 @@ module StoreAutopilot
       UI.info("#{'last upload'.ljust(24)}#{upload['version']} (#{upload['build']}): #{upload['state'].to_s.downcase.tr('_', ' ')}")
       Array(upload["errors"]).each { |e| UI.bad("Apple: #{e}") }
     end
+
+    def machine_lock(what, &) = MachineLock.new(home: @home, app_id: @config.app_id, what: what).hold(&)
 
     # Retries only with the `retries` feature on.
     def retries(count) = @config.feature?(:retries) ? count : 0
