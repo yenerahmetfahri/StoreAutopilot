@@ -118,7 +118,7 @@ class FastfileTest < Minitest::Test
     FastfileHarness::Spaceship::ConnectAPI::App.found = FastfileHarness::FakeApp.new(live: "1.0.0", in_review: "1.1.0")
     lanes = FastfileHarness.new(latest_testflight_build_number: 0)
     assert_equal({ "app" => true, "live_version" => "1.0.0", "in_review_version" => "1.1.0",
-                   "pending_release_version" => nil, "build_number" => 0 }, lanes.run(:ios, :status, IOS))
+                   "pending_release_version" => nil, "build_number" => 0, "last_upload" => nil }, lanes.run(:ios, :status, IOS))
     assert_equal 0, lanes.called(:latest_testflight_build_number).first[:initial_build_number]
   end
 

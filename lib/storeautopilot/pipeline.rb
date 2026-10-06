@@ -88,6 +88,7 @@ module StoreAutopilot
           { "live" => s["live_version"], "in review" => s["in_review_version"], "approved, not released" => s["pending_release_version"],
             "newest TestFlight build" => (s["build_number"].to_i.positive? ? s["build_number"] : nil) }
             .each { |label, value| UI.info("#{label.ljust(24)}#{value || '—'}") }
+          show_last_upload(s["last_upload"])
         end
         show_findings(StoreStatus.ios(s, version: @config.version_name, bundle_id: @config.ios[:bundle_id]))
       end
@@ -319,6 +320,12 @@ module StoreAutopilot
       findings.select { |f| f.status == :warn }.each { |f| UI.warn(f.message) }
       failed = findings.find { |f| f.status == :fail }
       raise Error.new(failed.message, hint: failed.hint) if failed
+    end
+
+    def show_last_upload(upload)
+      return unless upload
+      UI.info("#{'last upload'.ljust(24)}#{upload['version']} (#{upload['build']}): #{upload['state'].to_s.downcase.tr('_', ' ')}")
+      Array(upload["errors"]).each { |e| UI.bad("Apple: #{e}") }
     end
 
     def check_secrets!

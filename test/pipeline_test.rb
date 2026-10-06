@@ -221,7 +221,8 @@ class PipelineTest < Minitest::Test
       shell = FakeShell.new
       shell.define_singleton_method(:capture) do |*cmd, env: {}, **|
         out = JSON.parse(File.read(env["STOREAUTOPILOT_JOB"]))["output"]
-        status = cmd[1] == "ios" ? { app: true, live_version: "1.2.2", in_review_version: "1.2.3", build_number: 41 }
+        status = cmd[1] == "ios" ? { app: true, live_version: "1.2.2", in_review_version: "1.2.3", build_number: 41,
+                                     last_upload: { version: "1.2.3", build: "42", state: "FAILED", errors: ["Invalid binary: missing icon"] } }
                                  : { tracks: { "internal" => [41, 40], "production" => [] }, errors: {} }
         File.write(out, JSON.generate(status))
         ""
@@ -235,6 +236,8 @@ class PipelineTest < Minitest::Test
       assert_match(/internal\s+version code 41/, text)
       assert_match(/production\s+—/, text)
       assert_includes text, "! Version 1.2.3 is in App Review"
+      assert_match(/last upload\s+1\.2\.3 \(42\): failed/, text)
+      assert_includes text, "✗ Apple: Invalid binary: missing icon"
     end
   end
 

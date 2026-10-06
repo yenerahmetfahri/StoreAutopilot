@@ -87,6 +87,20 @@ def unanswered_age_questions(age)
   AGE_QUESTIONS.select { |q| age.respond_to?(q) && age.public_send(q).nil? }
 end
 
+# Apple's processing result for the newest upload (buildUploads, App Store Connect API); nil if it can't be read.
+def last_build_upload(app)
+  # Newest by creation: an upload that never finished has no uploadedDate and would sort first on it.
+  upload = Array(asc_api(:get, "apps/#{app.id}/buildUploads?limit=50")["data"]).max_by { |u| u.dig("attributes", "createdDate").to_s }
+  return nil unless upload
+  a = upload["attributes"]
+  state = a["state"].is_a?(Hash) ? a["state"] : { "state" => a["state"] }
+  { version: a["cfBundleShortVersionString"], build: a["cfBundleVersion"], state: state["state"],
+    errors: Array(state["errors"]).map { |e| e["description"] || e["code"] }.compact }
+rescue StandardError => e
+  UI.message("No build upload state: #{e.message.lines.first}")
+  nil
+end
+
 platform :ios do
   # Whether the app record exists, which versions are live / in review / awaiting release, and the newest build number.
   lane :status do
@@ -99,7 +113,8 @@ platform :ios do
              live_version: app.get_live_app_store_version(platform: ios)&.version_string,
              in_review_version: app.get_in_review_app_store_version(platform: ios)&.version_string,
              pending_release_version: app.get_pending_release_app_store_version(platform: ios)&.version_string,
-             build_number: latest_testflight_build_number(app_identifier: job["bundle_id"], initial_build_number: 0).to_i)
+             build_number: latest_testflight_build_number(app_identifier: job["bundle_id"], initial_build_number: 0).to_i,
+             last_upload: last_build_upload(app))
     end
   end
 
