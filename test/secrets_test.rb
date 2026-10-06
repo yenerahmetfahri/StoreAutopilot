@@ -73,4 +73,40 @@ class SecretsTest < Minitest::Test
       assert_equal ["pw123", nil], secrets.demo_password(demo)
     end
   end
+
+  # One App Store Connect key and one Play service account for all apps, kept once.
+  def test_shared_keys_are_used_when_the_app_has_none
+    Dir.mktmpdir do |home|
+      shared = make_secrets(home, app_id: "shared")
+      app = StoreAutopilot::Secrets.new("second-app", home: home)
+      app.ensure_dir!
+      assert_equal File.join(shared, "asc_key.p8"), app.asc_key_path
+      assert_equal File.join(shared, "play.json"), app.play_json_path
+      assert_empty app.problems(%i[ios android])
+      File.write(File.join(app.dir, "play.json"), File.read(File.join(shared, "play.json")))
+      assert_equal File.join(app.dir, "play.json"), app.play_json_path # the app's own key wins
+    end
+  end
+
+  def test_missing_key_names_both_places
+    Dir.mktmpdir do |home|
+      app = StoreAutopilot::Secrets.new("second-app", home: home)
+      app.ensure_dir!
+      message = app.problems([:android]).first.first
+      assert_includes message, "missing play.json"
+      assert_includes message, File.join(home, ".storeautopilot", "shared")
+    end
+  end
+
+  def test_loose_shared_folder_is_reported_and_tightened
+    Dir.mktmpdir do |home|
+      shared = make_secrets(home, app_id: "shared")
+      File.chmod(0o755, shared)
+      app = StoreAutopilot::Secrets.new("second-app", home: home)
+      app.ensure_dir!
+      assert(app.problems([:ios]).any? { |m, _| m.include?("shared is readable by others") })
+      app.tighten!
+      assert_equal 0o700, File.stat(shared).mode & 0o777
+    end
+  end
 end

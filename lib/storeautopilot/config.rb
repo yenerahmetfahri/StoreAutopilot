@@ -40,6 +40,7 @@ module StoreAutopilot
       problems = []
       @app_id = data["app_id"].to_s
       problems << "app_id: use lowercase letters, digits, '.', '_' or '-'" unless @app_id.match?(/\A[a-z0-9][a-z0-9._-]*\z/)
+      problems << "app_id: `#{@app_id}` is reserved; pick another" if %w[shared runners].include?(@app_id)
       @flutter_dir = File.expand_path(data["flutter_project"] || ".", root)
       problems << "flutter_project: no pubspec.yaml in #{@flutter_dir}" unless File.file?(File.join(@flutter_dir, "pubspec.yaml"))
       @locales = parse_locales(data["locales"], problems)

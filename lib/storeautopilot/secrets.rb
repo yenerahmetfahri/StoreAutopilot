@@ -3,7 +3,11 @@ require "fileutils"
 
 module StoreAutopilot
   # ~/.storeautopilot/<app_id>/: keys and state. Contents are never printed.
+  # Keys used by several apps (one App Store Connect key, one Play service account) can live once in
+  # ~/.storeautopilot/shared/; a key in the app's own folder wins.
   class Secrets
+    SHARED = "shared"
+
     ASC_HINT = "App Store Connect → Users and Access → Integrations → App Store Connect API: create a key " \
                "(App Manager), save it as asc_key.p8 and write asc_key.json: {\"key_id\": \"…\", \"issuer_id\": \"…\"}"
     PLAY_HINT = "Google Cloud: create a service account + JSON key, invite its email in Play Console → Users and " \
@@ -13,11 +17,14 @@ module StoreAutopilot
 
     def initialize(app_id, home: Dir.home)
       @dir = File.join(home, ".storeautopilot", app_id)
+      @shared = File.join(home, ".storeautopilot", SHARED)
     end
 
-    def asc_key_path = File.join(dir, "asc_key.p8")
-    def asc_json_path = File.join(dir, "asc_key.json")
-    def play_json_path = File.join(dir, "play.json")
+    attr_reader :shared
+
+    def asc_key_path = key("asc_key.p8")
+    def asc_json_path = key("asc_key.json")
+    def play_json_path = key("play.json")
     def state_path = File.join(dir, "state.json")
     def demo_password_path = File.join(dir, "review_demo_password.txt")
 
@@ -36,8 +43,7 @@ module StoreAutopilot
 
     # Tightens permissions; returns the paths it changed.
     def tighten!
-      return [] unless File.directory?(dir)
-      paths = [dir] + Dir.children(dir).map { |c| File.join(dir, c) }
+      paths = [dir, @shared].select { |d| File.directory?(d) }.flat_map { |d| [d] + Dir.children(d).map { |c| File.join(d, c) } }
       paths.select { |p| loose?(p) }.each { |p| File.chmod(File.directory?(p) ? 0o700 : 0o600, p) }
     end
 
@@ -45,7 +51,9 @@ module StoreAutopilot
     def problems(platforms)
       return [["#{dir} does not exist", "Run `storeautopilot init`."]] unless File.directory?(dir)
       list = []
-      list << ["#{dir} is readable by others", "Run `storeautopilot doctor` to fix permissions."] if loose?(dir)
+      [dir, @shared].select { |d| File.directory?(d) && loose?(d) }.each do |d|
+        list << ["#{d} is readable by others", "Run `storeautopilot doctor` to fix permissions."]
+      end
       if platforms.include?(:ios)
         list.concat(file_problems(asc_key_path, ASC_HINT) { |t| "not a .p8 private key" unless t.include?("BEGIN PRIVATE KEY") })
         list.concat(file_problems(asc_json_path, ASC_HINT) { |t| asc_json_problem(t) })
@@ -60,8 +68,18 @@ module StoreAutopilot
 
     def loose?(path) = (File.stat(path).mode & 0o077) != 0
 
+    # The app's own copy if there is one, else the shared one; the app's path when neither exists.
+    def key(name)
+      own = File.join(dir, name)
+      shared = File.join(@shared, name)
+      File.file?(own) || !File.file?(shared) ? own : shared
+    end
+
     def file_problems(path, hint)
-      return [["missing #{path}", hint]] unless File.file?(path)
+      unless File.file?(path)
+        name = File.basename(path)
+        return [["missing #{name} (in #{dir}, or #{@shared} for keys several apps use)", hint]]
+      end
       list = []
       list << ["#{path} is readable by others", "Run `storeautopilot doctor` to fix permissions."] if loose?(path)
       issue = yield(File.read(path))

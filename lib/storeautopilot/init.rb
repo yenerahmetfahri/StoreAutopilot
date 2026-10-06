@@ -155,6 +155,7 @@ module StoreAutopilot
       UI.info("1. Edit storeautopilot.yml and store.md")
       UI.info("2. Fill in #{Screenshots::TEST} (navigate to each screen)")
       UI.info("3. Put your keys in #{secrets.dir}: asc_key.p8, asc_key.json, play.json")
+      UI.info("   (keys all your apps use can go once in #{secrets.shared})")
       UI.info("4. storeautopilot doctor")
       UI.info("5. storeautopilot shots   (preview screenshots)")
       UI.info("6. storeautopilot runner install, then push to the `release` branch")
