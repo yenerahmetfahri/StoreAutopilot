@@ -41,9 +41,14 @@ module StoreAutopilot
         o.on("--dry-run") { opts[:dry_run] = true }
         o.on("--online") { opts[:online] = true }
         o.on("-h", "--help") { opts[:help] = true }
+        o.on("-v", "--version") { opts[:version] = true }
       end
       args = parser.parse(argv)
       command = args.shift
+      if opts[:version]
+        UI.out.puts("storeautopilot #{VERSION}")
+        return 0
+      end
       if opts[:help] || command.nil?
         UI.out.puts(USAGE)
         return 0

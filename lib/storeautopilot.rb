@@ -1,4 +1,5 @@
 module StoreAutopilot
+  VERSION = "1.0.0"
   ROOT = File.expand_path("..", __dir__)
   TEMPLATES = File.join(ROOT, "templates")
 

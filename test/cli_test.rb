@@ -8,6 +8,11 @@ class CLITest < Minitest::Test
     assert_includes @out.string, "Usage: storeautopilot"
   end
 
+  def test_version
+    assert_equal 0, StoreAutopilot::CLI.start(["--version"])
+    assert_equal "storeautopilot #{StoreAutopilot::VERSION}\n", @out.string
+  end
+
   def test_unknown_command_fails_with_usage
     assert_equal 1, StoreAutopilot::CLI.start(["nope"])
     assert_includes @out.string, "Unknown command: nope"

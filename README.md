@@ -46,27 +46,33 @@ push never ends up in front of reviewers or users.
 - Flutter
 - Android Studio with the Android SDK and at least one emulator (AVD)
 - Google Chrome
-- Ruby 3.1 or newer (`brew install ruby`; the Ruby that ships with macOS is too old)
-- fastlane (`brew install fastlane`)
+- Homebrew (it brings Ruby and fastlane along); without it, Ruby 3.1 or newer and fastlane
 - GitHub CLI, logged in (`brew install gh && gh auth login`)
 - Your app in a **private** GitHub repository
 - An Apple Developer account and a Google Play developer account
 
 ## Install
 
+    brew install yenerahmetfahri/storeautopilot/storeautopilot
+
+This also installs Ruby and fastlane. Check it works:
+
+    storeautopilot --version
+
+To update later: `brew upgrade storeautopilot`.
+
+Without Homebrew, clone the repository and link the command:
+
     git clone https://github.com/yenerahmetfahri/StoreAutopilot.git ~/StoreAutopilot
     ln -s ~/StoreAutopilot/bin/storeautopilot /opt/homebrew/bin/storeautopilot
 
-Check it works:
-
-    storeautopilot --help
-
 ## Try it first
 
-The [example](example) folder holds a small Flutter app that is already set up. To see the store images it produces
-on your Mac, without any store account or upload:
+The [example](example) folder of this repository holds a small Flutter app that is already set up. To see the store
+images it produces on your Mac, without any store account or upload:
 
-    cd ~/StoreAutopilot/example
+    git clone https://github.com/yenerahmetfahri/StoreAutopilot.git
+    cd StoreAutopilot/example
     storeautopilot shots
 
 ## Set up an app
