@@ -53,9 +53,13 @@ module StoreAutopilot
         list << failure("App Review has no contact person.",
                         "Add review_contact to store.md (sent with the next release), or fill it in App Store Connect → App Review.")
       end
-      unless r["age_rating"]
-        list << failure("The age rating questions aren't answered.",
-                        "Answer them in App Store Connect → App Information → Age Rating, or set age_rating in store.md.")
+      unanswered = Array(r["age_rating_unanswered"])
+      if unanswered.any?
+        shown = unanswered.first(6).map { |q| q.tr("_", " ") }.join(", ")
+        shown += " and #{unanswered.size - 6} more" if unanswered.size > 6
+        list << failure("Age rating questions not answered: #{shown}.",
+                        "Answer them in App Store Connect → App Information → Age Rating (Apple added new ones in 2025), " \
+                        "or set age_rating in store.md.")
       end
       if r["content_rights"].nil? && listing.content_rights.nil?
         list << failure("Apple needs to know whether the app shows third-party content.",

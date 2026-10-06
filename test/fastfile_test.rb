@@ -272,3 +272,15 @@ class FastfileTest < Minitest::Test
     assert_nil promote[:rollout]
   end
 end
+
+class FastfileReadinessTest < Minitest::Test
+  # The 2025 age rating questions count: answering only the old ones is not enough.
+  def test_unanswered_new_age_rating_questions_are_reported
+    lanes = FastfileHarness.new
+    questions = lanes.singleton_class::AGE_QUESTIONS
+    age = Struct.new(*questions).new
+    (questions - %i[messaging_and_chat user_generated_content]).each { |q| age[q] = "NONE" }
+    assert_equal %i[messaging_and_chat user_generated_content], lanes.unanswered_age_questions(age)
+    assert_equal questions, lanes.unanswered_age_questions(nil)
+  end
+end

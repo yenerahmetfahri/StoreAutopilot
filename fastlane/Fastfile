@@ -50,6 +50,20 @@ def ensure_content_rights(app)
   app.update(attributes: { content_rights_declaration: wanted })
 end
 
+# Age rating questions App Review needs answered, including those Apple added in 2025.
+AGE_QUESTIONS = %i[
+  alcohol_tobacco_or_drug_use_or_references contests gambling_simulated guns_or_other_weapons horror_or_fear_themes
+  mature_or_suggestive_themes medical_or_treatment_information profanity_or_crude_humor sexual_content_graphic_and_nudity
+  sexual_content_or_nudity violence_cartoon_or_fantasy violence_realistic_prolonged_graphic_or_sadistic violence_realistic
+  advertising age_assurance gambling health_or_wellness_topics loot_box messaging_and_chat parental_controls
+  user_generated_content
+].freeze
+
+def unanswered_age_questions(age)
+  return AGE_QUESTIONS if age.nil?
+  AGE_QUESTIONS.select { |q| age.respond_to?(q) && age.public_send(q).nil? }
+end
+
 platform :ios do
   # Whether the app record exists, which versions are live / in review / awaiting release, and the newest build number.
   lane :status do
@@ -137,7 +151,7 @@ platform :ios do
              build: build && { number: build.version, state: build.processing_state },
              screenshots: screenshots,
              review_contact: !contact.nil? && contact.none? { |v| v.to_s.strip.empty? },
-             age_rating: !age.nil? && %i[gambling_simulated violence_cartoon_or_fantasy horror_or_fear_themes].any? { |a| !age.public_send(a).nil? },
+             age_rating_unanswered: unanswered_age_questions(age),
              content_rights: app.content_rights_declaration,
              privacy_urls: (info&.get_app_info_localizations || []).to_h { |l| [l.locale, l.privacy_policy_url.to_s] })
     end

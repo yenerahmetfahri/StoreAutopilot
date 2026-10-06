@@ -5,7 +5,7 @@ class PipelineTest < Minitest::Test
 
   IOS_STATUS = { app: true, live_version: nil, build_number: 7 }.freeze
   READY = { app: true, version: "1.2.3", build: { number: "7", state: "VALID" }, screenshots: { "en-US" => ["APP_IPHONE_67"] },
-            review_contact: true, age_rating: true, content_rights: "DOES_NOT_USE_THIRD_PARTY_CONTENT",
+            review_contact: true, age_rating_unanswered: [], content_rights: "DOES_NOT_USE_THIRD_PARTY_CONTENT",
             privacy_urls: { "en-US" => "https://example.com/privacy" } }.freeze
 
   # A quiet lane (fastlane run through capture) that writes result as its output.

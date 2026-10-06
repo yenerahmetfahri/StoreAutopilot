@@ -90,9 +90,9 @@ class StoreStatusSubmissionTest < Minitest::Test
   end
 
   def test_each_missing_piece_is_reported_and_only_failures_are_listed
-    r = READY.merge("build" => nil, "screenshots" => {}, "privacy_urls" => {}, "age_rating" => false)
+    r = READY.merge("build" => nil, "screenshots" => {}, "privacy_urls" => {}, "age_rating_unanswered" => %w[messaging_and_chat user_generated_content])
     messages = findings(r).map(&:message).join("\n")
-    %w[No\ TestFlight\ build 6.9" privacy\ policy age\ rating].each { |w| assert_includes messages, w }
+    %w[No\ TestFlight\ build 6.9" privacy\ policy messaging\ and\ chat,\ user\ generated\ content].each { |w| assert_includes messages, w }
     assert(findings(r).all? { |f| f.status == :fail })
   end
 
