@@ -50,6 +50,29 @@ def ensure_content_rights(app)
   app.update(attributes: { content_rights_declaration: wanted })
 end
 
+# A call to the App Store Connect API with the job's key, for what Spaceship has no model for (customer reviews).
+def asc_api(method, path, body = nil)
+  require "net/http"
+  token = Spaceship::ConnectAPI::Token.create(key_id: asc["key_id"], issuer_id: asc["issuer_id"], filepath: job["asc_key"])
+  uri = URI("https://api.appstoreconnect.apple.com/v1/#{path}")
+  request = (method == :post ? Net::HTTP::Post : Net::HTTP::Get).new(uri)
+  request["Authorization"] = "Bearer #{token.text}"
+  request["Content-Type"] = "application/json"
+  request.body = JSON.generate(body) if body
+  response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
+  data = response.body.to_s.empty? ? {} : JSON.parse(response.body)
+  UI.user_error!(data.dig("errors", 0, "detail") || "HTTP #{response.code}") unless response.is_a?(Net::HTTPSuccess)
+  data
+end
+
+# Google's API client with play.json, through supply.
+def play_api
+  require "supply"
+  Supply.config = FastlaneCore::Configuration.create(Supply::Options.available_options,
+                                                     package_name: job["package"], json_key: job["play_json"])
+  Supply::Client.make_from_config.client
+end
+
 # Age rating questions App Review needs answered, including those Apple added in 2025.
 AGE_QUESTIONS = %i[
   alcohol_tobacco_or_drug_use_or_references contests gambling_simulated guns_or_other_weapons horror_or_fear_themes
@@ -157,6 +180,32 @@ platform :ios do
     end
   end
 
+  # Newest customer reviews with whether they have a reply; read only.
+  lane :reviews do
+    reporting_errors do
+      asc_login
+      app = Spaceship::ConnectAPI::App.find(job["bundle_id"])
+      next output(app: false) unless app
+      data = asc_api(:get, "apps/#{app.id}/customerReviews?sort=-createdDate&limit=#{job['limit'] || 20}&include=response")
+      replied = Array(data["included"]).select { |i| i["type"] == "customerReviewResponses" }
+      reviews = Array(data["data"]).map do |r|
+        a = r["attributes"]
+        response_id = r.dig("relationships", "response", "data", "id")
+        { id: r["id"], rating: a["rating"], title: a["title"], body: a["body"], author: a["reviewerNickname"],
+          date: a["createdDate"], territory: a["territory"], replied: !response_id.nil? || replied.any? { |x| x["id"] == response_id } }
+      end
+      output(reviews: reviews)
+    end
+  end
+
+  lane :reply do
+    asc_login
+    asc_api(:post, "customerReviewResponses",
+            { data: { type: "customerReviewResponses", attributes: { responseBody: job["text"] },
+                      relationships: { review: { data: { type: "customerReviews", id: job["review_id"] } } } } })
+    output(ok: true)
+  end
+
   lane :submit do
     asc_login
     ensure_content_rights(Spaceship::ConnectAPI::App.find(job["bundle_id"]))
@@ -190,13 +239,31 @@ platform :android do
     end
   end
 
+  # Reviews with text from roughly the last week (all Google's API returns), with whether they have a reply; read only.
+  lane :reviews do
+    reporting_errors do
+      list = play_api.list_reviews(job["package"], max_results: job["limit"] || 20)
+      reviews = Array(list.reviews).map do |r|
+        user = r.comments.map(&:user_comment).compact.first
+        { id: r.review_id, rating: user&.star_rating, body: user&.text.to_s.strip, author: r.author_name,
+          date: user&.last_modified && Time.at(user.last_modified.seconds.to_i).utc.iso8601, version: user&.app_version_name,
+          replied: r.comments.any?(&:developer_comment) }
+      end
+      output(reviews: reviews)
+    end
+  end
+
+  lane :reply do
+    request = Google::Apis::AndroidpublisherV3::ReviewsReplyRequest.new(reply_text: job["text"])
+    play_api.reply_review(job["package"], job["review_id"], request)
+    output(ok: true)
+  end
+
   # Uploads the Data safety form as the CSV Play Console exports (App content → Data safety → Export to CSV).
   lane :data_safety do
-    require "supply"
-    Supply.config = FastlaneCore::Configuration.create(Supply::Options.available_options,
-                                                       package_name: job["package"], json_key: job["play_json"])
+    client = play_api
     request = Google::Apis::AndroidpublisherV3::SafetyLabelsUpdateRequest.new(safety_labels: File.read(job["csv"]))
-    Supply::Client.make_from_config.client.data_application_safety(job["package"], request)
+    client.data_application_safety(job["package"], request)
     UI.success("Data safety form updated")
   end
 

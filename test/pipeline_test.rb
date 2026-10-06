@@ -435,3 +435,48 @@ class PipelineTest < Minitest::Test
     end
   end
 end
+
+class ReviewsTest < Minitest::Test
+  include Fixtures
+
+  def pipeline(dir, shell)
+    home = File.join(dir, "home")
+    make_secrets(home)
+    StoreAutopilot::Pipeline.new(config: StoreAutopilot::Config.load(make_app(dir)), shell: shell, home: home)
+  end
+
+  def test_lists_reviews_with_reply_ids
+    Dir.mktmpdir do |dir|
+      shell = FakeShell.new(
+        "fastlane ios reviews" => PipelineTest.lane_result(reviews: [{ id: "a1", rating: 2, title: "Crashes", body: "On start", author: "Kim",
+                                                                       date: "2026-10-01T10:00:00Z", territory: "USA", replied: false }]),
+        "fastlane android reviews" => PipelineTest.lane_result(reviews: [{ id: "gp:1", rating: 5, body: "Love it", author: "Lee",
+                                                                           date: "2026-10-02T09:00:00Z", version: "1.2.3", replied: true }]))
+      StoreAutopilot::UI.out = (out = StringIO.new)
+      pipeline(dir, shell).reviews
+      assert_includes out.string, "★★☆☆☆  Kim · 2026-10-01 · USA  → reply: ios:a1"
+      assert_includes out.string, "Crashes — On start"
+      assert_includes out.string, "★★★★★  Lee · 2026-10-02 · 1.2.3  ✓ replied"
+    end
+  end
+
+  def test_reply_goes_to_the_right_store
+    Dir.mktmpdir do |dir|
+      shell = FakeShell.new("fastlane android reply" => PipelineTest.lane_result(ok: true))
+      pipeline(dir, shell).reply_review("android:gp:1", "Thanks, fixed in 1.2.4!")
+      assert_equal({ "package" => "com.example.demo", "review_id" => "gp:1", "text" => "Thanks, fixed in 1.2.4!" },
+                   shell.jobs["android reply"].slice("package", "review_id", "text"))
+    end
+  end
+
+  def test_reply_is_checked_before_sending
+    Dir.mktmpdir do |dir|
+      shell = FakeShell.new
+      p = pipeline(dir, shell)
+      assert_includes assert_raises(StoreAutopilot::Error) { p.reply_review("android:gp:1", "x" * 351) }.message, "allows 350"
+      assert_includes assert_raises(StoreAutopilot::Error) { p.reply_review("12345", "Thanks") }.message, "Which review"
+      assert_raises(StoreAutopilot::Error) { p.reply_review("ios:1", "  ") }
+      assert_empty shell.captures
+    end
+  end
+end

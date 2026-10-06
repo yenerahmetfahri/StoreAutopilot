@@ -100,6 +100,40 @@ module StoreAutopilot
       nil
     end
 
+    REPLY_LIMITS = { "ios" => 5970, "android" => 350 }.freeze
+
+    # Newest reviews in both stores; unanswered ones show the id to reply with.
+    def reviews(limit: 20)
+      check_secrets!
+      { ios: ["App Store", -> { ios_job(limit: limit) }], android: ["Google Play", -> { android_job(limit: limit) }] }.each do |platform, (store, job)|
+        next unless @platforms.include?(platform)
+        UI.step("#{store}: newest reviews")
+        result = @fastlane.lane(platform, :reviews, job.call, quiet: true, retries: 1)
+        next UI.warn(result["error"]) if result["error"]
+        list = result["reviews"] || []
+        next UI.info("none#{' (Google returns reviews with text from about the last week)' if platform == :android}") if list.empty?
+        list.each { |r| show_review(platform, r) }
+      end
+      nil
+    end
+
+    # Posts a public reply. target is "ios:<id>" or "android:<id>" as `reviews` prints it.
+    def reply_review(target, text)
+      platform, id = target.to_s.split(":", 2)
+      unless REPLY_LIMITS.key?(platform) && !id.to_s.empty?
+        raise Error.new("Which review? Use the id `storeautopilot reviews` prints, e.g. ios:123456 or android:gp:AOq…")
+      end
+      raise Error.new("The reply is empty.") if text.to_s.strip.empty?
+      limit = REPLY_LIMITS.fetch(platform)
+      raise Error.new("The reply has #{text.length} characters; #{platform == 'ios' ? 'the App Store' : 'Google Play'} allows #{limit}.") if text.length > limit
+      @platforms = [platform.to_sym]
+      check_secrets!
+      return plan(["reply publicly to #{target}: #{text}"]) if @dry_run
+      job = platform == "ios" ? ios_job(review_id: id, text: text) : android_job(review_id: id, text: text)
+      @fastlane.lane(platform.to_sym, :reply, job, quiet: true)
+      UI.ok("Reply posted to #{target}; it shows publicly once the store has processed it")
+    end
+
     # Raises (or completes, at 100) the share of users a staged Google Play production rollout reaches.
     def rollout(percent)
       raise Error.new("`rollout` is for Google Play; storeautopilot.yml has no android section.") unless @config.android?
@@ -285,6 +319,19 @@ module StoreAutopilot
       findings.select { |f| f.status == :warn }.each { |f| UI.warn(f.message) }
       failed = findings.find { |f| f.status == :fail }
       raise Error.new(failed.message, hint: failed.hint) if failed
+    end
+
+    def check_secrets!
+      problems = @secrets.problems(@platforms)
+      raise Error.new("Secrets are not ready: #{problems.first.first}", hint: "Run `storeautopilot doctor`.") if problems.any?
+    end
+
+    def show_review(platform, r)
+      stars = "★" * r["rating"].to_i + "☆" * (5 - r["rating"].to_i)
+      where = [r["author"], r["date"].to_s[0, 10], r["version"] || r["territory"]].compact.reject(&:empty?).join(" · ")
+      UI.info("#{stars}  #{where}#{r['replied'] ? '  ✓ replied' : "  → reply: #{platform}:#{r['id']}"}")
+      text = [r["title"], r["body"]].compact.reject(&:empty?).join(" — ")
+      UI.info("  #{text.length > 300 ? "#{text[0, 297]}…" : text}") unless text.empty?
     end
 
     def show_findings(findings)

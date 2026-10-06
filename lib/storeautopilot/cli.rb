@@ -2,7 +2,7 @@ require "optparse"
 
 module StoreAutopilot
   class CLI
-    COMMANDS = %w[init import doctor privacy status shots preview release submit rollout runner].freeze
+    COMMANDS = %w[init import doctor privacy status reviews shots preview release submit rollout runner].freeze
     USAGE = <<~TXT
       Usage: storeautopilot <command> [options]
 
@@ -13,6 +13,7 @@ module StoreAutopilot
                            --online also asks App Store Connect and Google Play
         privacy            Show what to tick in App Privacy and Data safety, from store.md's privacy declaration
         status             Show what App Store Connect and Google Play hold for this app
+        reviews            Newest reviews in both stores; `reviews reply ios:ID "text"` answers one
         shots              Capture and compose store screenshots locally, then open the preview
         preview            Show how both store pages will read, with the last screenshots
         release            Build, upload to TestFlight / Play, update the store listing

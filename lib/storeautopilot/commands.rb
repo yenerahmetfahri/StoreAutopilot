@@ -47,6 +47,11 @@ module StoreAutopilot
     def submit(_args, opts) = pipeline(opts).submit
     def status(_args, opts) = pipeline(opts).status
 
+    def reviews(args, opts)
+      return pipeline(opts).reviews unless args.first == "reply"
+      pipeline(opts).reply_review(args[1], args[2..].to_a.join(" "))
+    end
+
     def privacy(_args, opts)
       c = config(opts)
       listing = Listing.load(c.listing_path)
