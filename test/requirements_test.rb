@@ -5,7 +5,7 @@ class RequirementsTest < Minitest::Test
   R = StoreAutopilot::Requirements
 
   def app(dir, gradle: "targetSdk = 36", deployment: "15.0")
-    config = StoreAutopilot::Config.load(make_app(dir))
+    config = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:store_requirements)))
     FileUtils.mkdir_p(File.join(config.flutter_dir, "android/app"))
     File.write(File.join(config.flutter_dir, "android/app/build.gradle.kts"), "android {\n  defaultConfig {\n    #{gradle}\n  }\n}\n")
     FileUtils.mkdir_p(File.join(config.flutter_dir, "ios/Runner.xcodeproj"))

@@ -34,8 +34,9 @@ module StoreAutopilot
         report("Store listing", listing_checks(config))
         report("Secrets", secret_checks(config))
         report("Flutter project", flutter_checks(config))
-        report("Store requirements", Requirements.new(config: config, shell: @shell).findings(config.platforms))
-        report("App Review risks", review_risks(config))
+        report("Store requirements", Requirements.new(config: config, shell: @shell).findings(config.platforms)) if config.feature?(:store_requirements)
+        report("App Review risks", review_risks(config)) if config.feature?(:review_risks)
+        report("Optional features", feature_checks(config))
         report("Repository", repo_checks(config))
         report("GitHub runner", [runner_check(config)])
         report("Stores (online)", online_checks(config)) if @online
@@ -149,6 +150,15 @@ module StoreAutopilot
                 "If the app only uses encryption built into iOS (HTTPS, Keychain…), set `ios.uses_encryption: false`.")
     end
 
+    def feature_checks(config)
+      on = config.enabled_features
+      off = Config::FEATURES.keys - on
+      list = on.map { |f| Check.new(:ok, "#{f}: on") }
+      list << Check.new(:ok, "off: #{off.join(', ')}", nil) if off.any?
+      list << Check.new(:ok, "turn any on under `features:` in storeautopilot.yml") if on.empty?
+      list
+    end
+
     def review_risks(config)
       findings = Compliance.new(config: config, listing: Listing.load(config.listing_path)).findings
       findings.empty? ? [Check.new(:ok, "nothing found")] : findings
@@ -184,7 +194,9 @@ module StoreAutopilot
 
     def listing_checks(config)
       listing = Listing.load(config.listing_path).validate!(config)
-      [Check.new(:ok, "store.md"), *listing.advice(config).map { |a| Check.new(:warn, a) }, *privacy_checks(config, listing)]
+      advice = config.feature?(:text_advice) ? listing.advice(config).map { |a| Check.new(:warn, a) } : []
+      privacy = config.feature?(:privacy_check) ? privacy_checks(config, listing) : []
+      [Check.new(:ok, "store.md"), *advice, *privacy]
     rescue Error => e
       [Check.new(:fail, e.message, e.hint)]
     end
@@ -208,7 +220,7 @@ module StoreAutopilot
       end
       if config.ios?
         list << Check.new(:ok, config.ipad? ? "runs on iPad: iPad screenshots will be captured too" : "iPhone only: no iPad screenshots needed")
-        list << encryption_check(config)
+        list << encryption_check(config) if config.feature?(:review_risks)
       end
       missing = Screenshots.new(config: config, shell: @shell, devices: {}).missing_files
       list << (missing.empty? ? Check.new(:ok, "screenshot test") : Check.new(:fail, "missing #{missing.join(', ')}", "Run `storeautopilot init`."))

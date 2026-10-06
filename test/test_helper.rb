@@ -94,6 +94,9 @@ module Fixtures
     - 02_play: Play anywhere
   MD
 
+  # VALID_YML (or yml) with the named optional features turned on.
+  def with_features(*names, yml: VALID_YML) = yml + "features:\n" + names.map { |n| "  #{n}: true\n" }.join
+
   # Creates an app repo in dir; returns the storeautopilot.yml path.
   def make_app(dir, yml: VALID_YML, store_md: VALID_MD)
     FileUtils.mkdir_p(File.join(dir, "app"))

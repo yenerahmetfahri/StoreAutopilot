@@ -31,3 +31,19 @@ android:
   # keystore_properties: ~/Keys/{{app_id}}/key.properties
   # rollout: 20               # submit starts production with 20% of users; widen with `storeautopilot rollout 50`
   # halt_crash_rate: 1.09     # `rollout watch` halts a staged rollout above this crash rate (percent)
+
+# Optional features, all off. Turn on what you want; `storeautopilot doctor` lists them.
+features:
+  store_check: false          # check both stores before building (version already live, missing app record)
+  store_requirements: false   # stop when a store rule in force isn't met (target SDK, Xcode, minimum iOS)
+  review_risks: false         # stop on certain App Review problems (missing AdMob id, tracking prompt)
+  text_advice: false          # point out wasted keyword characters, long captions, example URLs
+  privacy_check: false        # doctor compares store.md's privacy declaration with your packages
+  submit_check: false         # check everything App Review needs before submit
+  reuse_screenshots: false    # skip capturing when the app hasn't changed since the last capture
+  resume: false               # a re-run of the same commit skips builds already uploaded
+  retries: false              # retry store checks and listing updates after a passing API error
+  job_summary: false          # write a summary on the GitHub Actions run page
+  rollout_guard: false        # check Play vitals before widening a staged rollout; `rollout watch` halts a bad one
+  data_safety_upload: false   # upload storeautopilot/data_safety.csv to Google Play when it changes
+  api_upload: false           # upload iOS builds through the App Store Connect API (instead of Apple's upload tool)

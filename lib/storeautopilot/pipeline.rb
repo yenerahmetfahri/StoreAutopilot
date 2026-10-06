@@ -27,14 +27,14 @@ module StoreAutopilot
 
     def release
       listing = preflight
-      check_requirements
-      check_review_risks(listing)
+      check_requirements if @config.feature?(:store_requirements)
+      check_review_risks(listing) if @config.feature?(:review_risks)
       return plan(release_plan) if @dry_run
       notifying("Release") do
         Disk.check!(@shell, @home)
         FileUtils.rm_rf(store_dir)
         id = release_id
-        uploaded = uploaded_builds(id)
+        uploaded = @config.feature?(:resume) ? uploaded_builds(id) : {}
         number = next_build_number
         number = uploaded.values.max if uploaded.any? # a re-run continues with the build number already in use
         @state.record("build_number", number)
@@ -56,7 +56,7 @@ module StoreAutopilot
 
     def submit
       listing = preflight
-      check_ios_submission(listing) if @platforms.include?(:ios)
+      check_ios_submission(listing) if @platforms.include?(:ios) && @config.feature?(:submit_check)
       if @dry_run
         return plan(@platforms.map { |p| p == :ios ? "submit the latest TestFlight build for App Store review#{' (phased release)' if @config.ios[:phased_release]}" : "promote #{@config.android[:track]} → production#{rollout_note}" })
       end
@@ -83,7 +83,7 @@ module StoreAutopilot
       raise Error.new("Secrets are not ready: #{problems.first.first}", hint: "Run `storeautopilot doctor`.") if problems.any?
       if @platforms.include?(:ios)
         UI.step("App Store (#{@config.ios[:bundle_id]})")
-        s = @fastlane.lane(:ios, :status, ios_job, quiet: true, retries: 1)
+        s = @fastlane.lane(:ios, :status, ios_job, quiet: true, retries: retries(1))
         if s["app"]
           { "live" => s["live_version"], "in review" => s["in_review_version"], "approved, not released" => s["pending_release_version"],
             "newest TestFlight build" => (s["build_number"].to_i.positive? ? s["build_number"] : nil) }
@@ -94,7 +94,7 @@ module StoreAutopilot
       end
       if @platforms.include?(:android)
         UI.step("Google Play (#{@config.android[:package]})")
-        s = @fastlane.lane(:android, :status, android_job, quiet: true, retries: 1)
+        s = @fastlane.lane(:android, :status, android_job, quiet: true, retries: retries(1))
         (s["tracks"] || {}).each { |track, codes| UI.info("#{track.ljust(24)}#{codes.empty? ? '—' : "version code #{codes.max}"}") }
         show_findings(StoreStatus.android(s, track: @config.android[:track]))
       end
@@ -109,7 +109,7 @@ module StoreAutopilot
       { ios: ["App Store", -> { ios_job(limit: limit) }], android: ["Google Play", -> { android_job(limit: limit) }] }.each do |platform, (store, job)|
         next unless @platforms.include?(platform)
         UI.step("#{store}: newest reviews")
-        result = @fastlane.lane(platform, :reviews, job.call, quiet: true, retries: 1)
+        result = @fastlane.lane(platform, :reviews, job.call, quiet: true, retries: retries(1))
         next UI.warn(result["error"]) if result["error"]
         list = result["reviews"] || []
         next UI.info("none#{' (Google returns reviews with text from about the last week)' if platform == :android}") if list.empty?
@@ -143,7 +143,7 @@ module StoreAutopilot
       end
       @platforms = [:android]
       preflight
-      health = rollout_health
+      health = @config.feature?(:rollout_guard) ? rollout_health : nil
       if health&.status == :fail
         raise Error.new("Not widening the rollout: #{health.message}.", hint: "`storeautopilot rollout watch` halts it. #{health.hint}")
       end
@@ -160,6 +160,7 @@ module StoreAutopilot
     # worse (see StoreStatus.rollout_health). Does nothing when no staged rollout is running.
     def rollout_watch
       raise Error.new("`rollout watch` is for Google Play; storeautopilot.yml has no android section.") unless @config.android?
+      return UI.info("rollout_guard is off; turn it on under `features:` in storeautopilot.yml to watch rollouts.") unless @config.feature?(:rollout_guard)
       @platforms = [:android]
       problems = @secrets.problems(@platforms)
       raise Error.new("Secrets are not ready: #{problems.first.first}", hint: "Run `storeautopilot doctor`.") if problems.any?
@@ -191,10 +192,10 @@ module StoreAutopilot
       rollout = staged_rollout
       return nil unless rollout && rollout["version_code"]
       UI.step("Checking Google Play vitals for version code #{rollout['version_code']}")
-      status = @fastlane.lane(:android, :status, android_job, quiet: true, retries: 1)
+      status = @fastlane.lane(:android, :status, android_job, quiet: true, retries: retries(1))
       codes = (status.dig("tracks", "production") || []).map(&:to_i).sort
       previous = codes.reject { |c| c >= rollout["version_code"].to_i }.max
-      vitals = @fastlane.lane(:android, :vitals, android_job, quiet: true, retries: 1)
+      vitals = @fastlane.lane(:android, :vitals, android_job, quiet: true, retries: retries(1))
       StoreStatus.rollout_health(vitals, current: rollout["version_code"], previous: previous,
                                          max_rate: @config.android[:halt_crash_rate]).tap { |f| show_findings([f]) }
     end
@@ -220,7 +221,7 @@ module StoreAutopilot
 
     def preflight
       listing = Listing.load(@config.listing_path).validate!(@config)
-      listing.advice(@config).each { |a| UI.warn(a) }
+      listing.advice(@config).each { |a| UI.warn(a) } if @config.feature?(:text_advice)
       problems = @secrets.problems(@platforms)
       if @platforms.include?(:ios)
         _, demo_problem = @secrets.demo_password(listing)
@@ -264,7 +265,10 @@ module StoreAutopilot
     def notifying(what)
       first_step = UI.steps.size
       first_warning = UI.warnings.size
-      report = ->(**result) { Summary.write(steps: UI.steps[first_step..], warnings: UI.warnings[first_warning..], **result) }
+      report = lambda do |**result|
+        next unless @config.feature?(:job_summary)
+        Summary.write(steps: UI.steps[first_step..], warnings: UI.warnings[first_warning..], **result)
+      end
       message = yield
       report.call(title: "#{what}: #{message}", ok: true)
       UI.step("Done")
@@ -282,13 +286,13 @@ module StoreAutopilot
       UI.step("Checking the stores")
       numbers = [@state["build_number"].to_i]
       if @platforms.include?(:ios)
-        status = @fastlane.lane(:ios, :status, ios_job, retries: 2)
-        enforce!(StoreStatus.ios(status, version: @config.version_name, bundle_id: @config.ios[:bundle_id]))
+        status = @fastlane.lane(:ios, :status, ios_job, retries: retries(2))
+        enforce!(StoreStatus.ios(status, version: @config.version_name, bundle_id: @config.ios[:bundle_id])) if @config.feature?(:store_check)
         numbers << status["build_number"].to_i
       end
       if @platforms.include?(:android)
-        status = @fastlane.lane(:android, :status, android_job, retries: 2)
-        enforce!(StoreStatus.android(status, track: @config.android[:track]))
+        status = @fastlane.lane(:android, :status, android_job, retries: retries(2))
+        enforce!(StoreStatus.android(status, track: @config.android[:track])) if @config.feature?(:store_check)
         numbers << StoreStatus.android_build_number(status)
       end
       numbers.max + 1
@@ -297,7 +301,7 @@ module StoreAutopilot
     # Read-only; runs for --dry-run too, so it doubles as "is this version ready for review?".
     def check_ios_submission(listing)
       UI.step("Checking that version #{@config.version_name} is ready for App Review")
-      readiness = @fastlane.lane(:ios, :readiness, ios_job(version: @config.version_name), quiet: true, retries: 1)
+      readiness = @fastlane.lane(:ios, :readiness, ios_job(version: @config.version_name), quiet: true, retries: retries(1))
       findings = StoreStatus.ios_submission(readiness, config: @config, listing: listing)
       show_findings(findings)
       failed = findings.select { |f| f.status == :fail }
@@ -327,6 +331,9 @@ module StoreAutopilot
       UI.info("#{'last upload'.ljust(24)}#{upload['version']} (#{upload['build']}): #{upload['state'].to_s.downcase.tr('_', ' ')}")
       Array(upload["errors"]).each { |e| UI.bad("Apple: #{e}") }
     end
+
+    # Retries only with the `retries` feature on.
+    def retries(count) = @config.feature?(:retries) ? count : 0
 
     def check_secrets!
       problems = @secrets.problems(@platforms)
@@ -364,7 +371,7 @@ module StoreAutopilot
       raw = File.join(@work, "raw")
       inputs = ShotInputs.new(config: @config, shell: @shell).digest(target)
       key = "shot_inputs_#{target}"
-      if !@fresh_shots && inputs && @state[key] == inputs && raw_complete?(raw, target)
+      if @config.feature?(:reuse_screenshots) && !@fresh_shots && inputs && @state[key] == inputs && raw_complete?(raw, target)
         UI.ok("app unchanged since the last capture; reusing those screenshots (--fresh-shots to retake)")
       else
         @state.record(key, nil) if @state[key]
@@ -419,7 +426,7 @@ module StoreAutopilot
       @fastlane.lane(:ios, :metadata, ios_job(version: @config.version_name, metadata_path: (meta if text),
                                               screenshots_path: (shots if images),
                                               age_rating: listing.write_age_rating(File.join(@work, "age_rating.json"))),
-                     retries: 1)
+                     retries: retries(1))
       @state.record("ios_text", text_digest) if text
       @state.record("ios_shots", shots_digest) if images
     end
@@ -436,11 +443,11 @@ module StoreAutopilot
 
     def data_safety
       csv = @config.data_safety_csv
-      return unless csv
+      return unless csv && @config.feature?(:data_safety_upload)
       digest = State.digest(File.dirname(csv), only: /\Adata_safety\.csv\z/)
       return UI.ok("Data safety form unchanged") unless @state.changed?("android_data_safety", digest)
       UI.step("Android: updating the Data safety form")
-      @fastlane.lane(:android, :data_safety, android_job(csv: csv), retries: 1)
+      @fastlane.lane(:android, :data_safety, android_job(csv: csv), retries: retries(1))
       @state.record("android_data_safety", digest)
     end
 
@@ -454,7 +461,7 @@ module StoreAutopilot
       return UI.ok("Google Play listing unchanged") unless text || images
       UI.step("Android: updating Google Play listing (#{[('text' if text), ('images' if images)].compact.join(' + ')})")
       @fastlane.lane(:android, :metadata, android_job(metadata_path: meta, text: text, images: images,
-                                                     track: @config.android[:track]), retries: 1)
+                                                     track: @config.android[:track]), retries: retries(1))
       @state.record("android_text", text_digest) if text
       @state.record("android_images", images_digest) if images
     end

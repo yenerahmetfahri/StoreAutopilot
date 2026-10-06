@@ -80,7 +80,7 @@ module StoreAutopilot
         return nil
       end
       UI.step("Reading the #{platform == :ios ? 'App Store' : 'Google Play'} listing")
-      result = @fastlane.lane(platform, :listing, yield, quiet: true, retries: 1)
+      result = @fastlane.lane(platform, :listing, yield, quiet: true, retries: @config.feature?(:retries) ? 1 : 0)
       if result["error"] || result["app"] == false
         UI.warn(result["error"] || "no app with bundle ID #{@config.ios[:bundle_id]} in App Store Connect")
         return nil

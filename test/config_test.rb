@@ -86,6 +86,23 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_optional_features_are_off_unless_turned_on
+    Dir.mktmpdir do |dir|
+      config = StoreAutopilot::Config.load(make_app(dir))
+      assert_empty config.enabled_features
+      assert(StoreAutopilot::Config::FEATURES.keys.none? { |f| config.feature?(f) })
+      on = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:retries, :resume)))
+      assert_equal %w[resume retries], on.enabled_features.sort
+      err = assert_raises(StoreAutopilot::Error) { StoreAutopilot::Config.load(make_app(dir, yml: with_features(:turbo))) }
+      assert_includes err.message, "features.turbo is not known"
+    end
+  end
+
+  def test_template_lists_every_feature_turned_off
+    template = File.read(File.join(StoreAutopilot::TEMPLATES, "app", "storeautopilot.yml"))
+    StoreAutopilot::Config::FEATURES.each_key { |f| assert_match(/^  #{f}: false /, template) }
+  end
+
   def test_missing_file_has_hint
     err = assert_raises(StoreAutopilot::Error) { StoreAutopilot::Config.load("/nonexistent/storeautopilot.yml") }
     assert_includes err.hint, "storeautopilot init"

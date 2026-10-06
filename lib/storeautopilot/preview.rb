@@ -27,7 +27,7 @@ module StoreAutopilot
         stores << play(fields, codes[:play]) if @config.android?
         %(<section><h2>#{h(id)}</h2><div class="stores">#{stores.join}</div></section>)
       end
-      advice = @listing.advice(@config)
+      advice = @config.feature?(:text_advice) ? @listing.advice(@config) : []
       notes = advice.empty? ? "" : %(<aside><h2>Suggestions</h2><ul>#{advice.map { |a| "<li>#{h(a)}</li>" }.join}</ul></aside>)
       <<~HTML
         <!doctype html>

@@ -28,7 +28,7 @@ class SummaryTest < Minitest::Test
       ENV["GITHUB_STEP_SUMMARY"] = path
       home = File.join(dir, "home")
       make_secrets(home)
-      config = StoreAutopilot::Config.load(make_app(dir))
+      config = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:job_summary, :store_check)))
       shell = FakeShell.new
       shell.on_run do |cmd, env|
         next unless cmd[2] == "status"

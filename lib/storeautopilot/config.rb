@@ -6,6 +6,23 @@ module StoreAutopilot
     HEX = /\A#\h{6}\z/
     FONT = /\A[\w ,.\-]+\z/ # no quotes: the value is placed inside a <style> block
 
+    # Optional behaviors, all off unless storeautopilot.yml turns them on under `features:`.
+    FEATURES = {
+      "store_check" => "check App Store Connect and Google Play before building (version already live, missing app record)",
+      "store_requirements" => "stop when a store rule in force isn't met (target SDK, Xcode, minimum iOS)",
+      "review_risks" => "stop on certain App Review problems (missing AdMob id, tracking without its prompt text)",
+      "text_advice" => "point out wasted keyword characters, long captions, example URLs",
+      "privacy_check" => "doctor compares the privacy declaration with your packages",
+      "submit_check" => "check everything App Review needs before submit",
+      "reuse_screenshots" => "skip capturing when the app hasn't changed since the last capture",
+      "resume" => "a re-run of the same commit skips builds already uploaded",
+      "retries" => "retry store checks and listing updates after a passing API error",
+      "job_summary" => "write a summary on the GitHub Actions run page",
+      "rollout_guard" => "check Play vitals before widening a staged rollout; `rollout watch` halts a bad one",
+      "data_safety_upload" => "upload storeautopilot/data_safety.csv to Google Play when it changes",
+      "api_upload" => "upload iOS builds through the App Store Connect API instead of Apple's upload tool"
+    }.freeze
+
     attr_reader :root, :app_id, :flutter_dir, :locales, :screenshots, :brand, :ios, :android
 
     def self.load(path)
@@ -33,6 +50,7 @@ module StoreAutopilot
       @brand = parse_brand(section(data, "brand", problems) || {}, problems)
       @ios = parse_ios(section(data, "ios", problems), problems)
       @android = parse_android(section(data, "android", problems), problems)
+      @features = parse_features(section(data, "features", problems) || {}, problems)
       problems << "ios / android: configure at least one" unless @ios || @android
       return if problems.empty?
       raise Error.new("storeautopilot.yml has problems:\n#{problems.map { |p| "    - #{p}" }.join("\n")}")
@@ -41,6 +59,9 @@ module StoreAutopilot
     def self.percent?(value) = value.is_a?(Numeric) && value.positive? && value <= 100
 
     def ios? = !@ios.nil?
+
+    def feature?(name) = @features.fetch(name.to_s)
+    def enabled_features = @features.select { |_, on| on }.keys
 
     # iPad screenshots are needed when the app runs on iPad: `ios.ipad` if set, else the Xcode project's device family.
     def ipad?
@@ -78,6 +99,15 @@ module StoreAutopilot
     end
 
     private
+
+    def parse_features(raw, problems)
+      (raw.keys - FEATURES.keys).each { |k| problems << "features.#{k} is not known (#{FEATURES.keys.join(', ')})" }
+      FEATURES.keys.to_h do |name|
+        value = raw.fetch(name, false)
+        problems << "features.#{name}: true or false" unless [true, false].include?(value)
+        [name, value == true]
+      end
+    end
 
     # A nested mapping, or nil when absent; anything else is reported.
     def section(data, key, problems)

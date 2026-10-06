@@ -11,9 +11,10 @@ on:
         description: "Submit the latest build for App Store review and promote Google Play to production"
         type: boolean
         default: false
-  # Every 6 hours: halts a staged Google Play rollout whose crash rate is too high; does nothing otherwise.
-  schedule:
-    - cron: "23 */6 * * *"
+  # With the rollout_guard feature on, uncomment to check a staged Google Play rollout every 6 hours and halt it
+  # when its crash rate is too high:
+  # schedule:
+  #   - cron: "23 */6 * * *"
 
 permissions:
   contents: read

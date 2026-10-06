@@ -27,10 +27,10 @@ class PipelineTest < Minitest::Test
     shell
   end
 
-  def release_ios(dir, shell)
+  def release_ios(dir, shell, yml: with_features(:store_check))
     home = File.join(dir, "home")
     make_secrets(home)
-    config = StoreAutopilot::Config.load(make_app(dir))
+    config = StoreAutopilot::Config.load(make_app(dir, yml: yml))
     StoreAutopilot::Pipeline.new(config: config, shell: shell, platforms: [:ios], skip_shots: true, home: home).release
   end
 
@@ -80,6 +80,27 @@ class PipelineTest < Minitest::Test
       assert_includes err.hint, "1.2.4"
       assert_equal ["ios status"], lanes(shell)
       refute(shell.runs.any? { |c| c.first == "flutter" })
+    end
+  end
+
+  # Without store_check the release goes ahead; the store itself will judge the upload.
+  def test_store_check_is_off_by_default
+    Dir.mktmpdir do |dir|
+      shell = fake_shell(ios_status: IOS_STATUS.merge(live_version: "1.2.3"))
+      release_ios(dir, shell, yml: Fixtures::VALID_YML)
+      assert_includes lanes(shell), "ios upload"
+    end
+  end
+
+  def test_rollout_watch_is_off_by_default
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      make_secrets(home)
+      StoreAutopilot::UI.out = (out = StringIO.new)
+      shell = FakeShell.new
+      StoreAutopilot::Pipeline.new(config: StoreAutopilot::Config.load(make_app(dir)), shell: shell, home: home).rollout_watch
+      assert_includes out.string, "rollout_guard is off"
+      assert_empty shell.captures
     end
   end
 
@@ -148,7 +169,7 @@ class PipelineTest < Minitest::Test
     Dir.mktmpdir do |dir|
       home = File.join(dir, "home")
       make_secrets(home)
-      config = StoreAutopilot::Config.load(make_app(dir))
+      config = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:reuse_screenshots)))
       main = File.join(config.flutter_dir, "lib", "main.dart")
       FileUtils.mkdir_p(File.dirname(main))
       File.write(main, "v1")
@@ -174,7 +195,7 @@ class PipelineTest < Minitest::Test
   def release_both(dir, shell, android_fails: false)
     home = File.join(dir, "home")
     make_secrets(home) unless File.directory?(home)
-    config = StoreAutopilot::Config.load(make_app(dir))
+    config = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:resume)))
     pipeline = StoreAutopilot::Pipeline.new(config: config, shell: shell, skip_shots: true, home: home)
     pipeline.define_singleton_method(:upload_android) do |_listing, _number|
       raise StoreAutopilot::Error, "Play upload failed" if android_fails
@@ -258,7 +279,7 @@ class PipelineTest < Minitest::Test
     Dir.mktmpdir do |dir|
       home = File.join(dir, "home")
       make_secrets(home)
-      config = StoreAutopilot::Config.load(make_app(dir))
+      config = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:data_safety_upload)))
       csv = File.join(dir, "storeautopilot", "data_safety.csv")
       FileUtils.mkdir_p(File.dirname(csv))
       File.write(csv, "Question ID,Response ID\n")
@@ -346,7 +367,7 @@ class PipelineTest < Minitest::Test
     Dir.mktmpdir do |dir|
       home = File.join(dir, "home")
       make_secrets(home)
-      config = StoreAutopilot::Config.load(make_app(dir))
+      config = StoreAutopilot::Config.load(make_app(dir, yml: with_features(:submit_check)))
       shell = fake_shell(readiness: READY.merge(build: { number: "7", state: "PROCESSING" }, review_contact: false, content_rights: nil))
       StoreAutopilot::UI.out = (out = StringIO.new)
       err = assert_raises(StoreAutopilot::Error) { StoreAutopilot::Pipeline.new(config: config, shell: shell, home: home).submit }
@@ -372,7 +393,7 @@ class PipelineTest < Minitest::Test
   def rollout_pipeline(dir, vitals:, production: [11, 12])
     home = File.join(dir, "home")
     make_secrets(home)
-    yml = Fixtures::VALID_YML.sub("package: com.example.demo", "package: com.example.demo\n  rollout: 20")
+    yml = with_features(:rollout_guard, yml: Fixtures::VALID_YML.sub("package: com.example.demo", "package: com.example.demo\n  rollout: 20"))
     config = StoreAutopilot::Config.load(make_app(dir, yml: yml))
     shell = FakeShell.new("fastlane android vitals" => PipelineTest.lane_result(vitals),
                           "fastlane android status" => PipelineTest.lane_result(tracks: { "production" => production }, errors: {}))
