@@ -18,7 +18,8 @@ class FakeShell
 
   # outputs: command substring => stdout (or a proc). Free disk space is plentiful unless a test says otherwise.
   def initialize(outputs = {})
-    @outputs = { "df -Pk" => DF_PLENTY, "rev-parse" => "", "status --porcelain" => "" }.merge(outputs)
+    @outputs = { "df -Pk" => DF_PLENTY, "rev-parse" => "", "status --porcelain" => "", "xcodebuild -version" => "Xcode 27.0\n",
+                 "--version --machine" => "{}" }.merge(outputs)
     @runs = []
     @captures = []
     @jobs = {}

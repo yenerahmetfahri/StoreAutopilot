@@ -34,6 +34,7 @@ module StoreAutopilot
         report("Store listing", listing_checks(config))
         report("Secrets", secret_checks(config))
         report("Flutter project", flutter_checks(config))
+        report("Store requirements", Requirements.new(config: config, shell: @shell).findings(config.platforms))
         report("Repository", repo_checks(config))
         report("GitHub runner", [runner_check(config)])
         report("Stores (online)", online_checks(config)) if @online

@@ -27,6 +27,7 @@ module StoreAutopilot
 
     def release
       listing = preflight
+      check_requirements
       return plan(release_plan) if @dry_run
       notifying("Release") do
         Disk.check!(@shell, @home)
@@ -218,6 +219,14 @@ module StoreAutopilot
       return if failed.empty?
       raise Error.new("Not ready for App Review (#{failed.size} problem#{'s' if failed.size > 1} above).",
                       hint: "Fix them, then run submit again. `storeautopilot submit --dry-run` checks without submitting.")
+    end
+
+    # Store rules in force (target SDK, Xcode, minimum iOS) are checked before building, not discovered at upload.
+    def check_requirements
+      findings = Requirements.new(config: @config, shell: @shell).findings(@platforms)
+      findings.select { |f| f.status == :warn }.each { |f| UI.warn(f.message) }
+      failed = findings.find { |f| f.status == :fail }
+      raise Error.new("Not accepted by the store: #{failed.message}", hint: failed.hint) if failed
     end
 
     def show_findings(findings)
