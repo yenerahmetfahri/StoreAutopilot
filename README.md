@@ -136,6 +136,7 @@ android:
   # emulator: Pixel_8          # AVD to use; default is the first one
   # keystore_properties: ~/Keys/my-app/key.properties   # lets doctor check signing
   # rollout: 20                # production starts with 20% of users (see "Going live")
+  # halt_crash_rate: 1.09      # rollout watch halts above this crash rate (percent)
 ```
 
 Leave out `ios` or `android` if you only publish to one store.
@@ -297,9 +298,15 @@ notification when it finishes or fails. The run's summary page lists every step 
 how to fix it. After that, the build is in TestFlight and on your Play track, and the store pages show the new text
 and screenshots.
 
-To see where things stand in both stores at any time — live version, version in review, newest builds, Play tracks:
+To see where things stand in both stores at any time — live version, version in review, newest builds, Apple's
+processing result for the last upload (with the reason if it was rejected), Play tracks:
 
     storeautopilot status
+
+And what users are saying, newest first in both stores, with an id to answer the ones without a reply:
+
+    storeautopilot reviews
+    storeautopilot reviews reply ios:1234567890 "Thanks! Fixed in 1.2.4."
 
 Screenshots are taken again only when the app itself changed. If only `store.md` or the version number changed, the
 screenshots from the last run are reused, which saves a few minutes.
@@ -333,6 +340,12 @@ widen it, and finish at 100:
     storeautopilot rollout 50
     storeautopilot rollout 100
 
+Before widening, the crash rate of the new version is checked in Google Play's vitals; a version that crashes clearly
+more than the one before is not widened. The workflow from `init` also runs `storeautopilot rollout watch` every six
+hours: it halts the staged rollout when the new version's crash rate goes above `halt_crash_rate` (1.09% by default,
+Google's own "bad behavior" line) or above three times the previous version's. This needs the Google Play Developer
+Reporting API enabled in the Google Cloud project of your service account.
+
 ## Commands
 
 | Command | What it does |
@@ -341,12 +354,14 @@ widen it, and finish at 100:
 | `storeautopilot import` | Writes `store.md` from the text already in both stores |
 | `storeautopilot doctor` | Checks tools, settings, store text, keys, repository safety and the runner; `--online` also checks both stores |
 | `storeautopilot status` | Shows what App Store Connect and Google Play hold for the app |
+| `storeautopilot reviews` | Newest reviews in both stores; `reviews reply` answers one |
 | `storeautopilot privacy` | Shows what to tick in App Privacy and Data safety, from `store.md` |
 | `storeautopilot shots` | Captures and composes the store images locally and opens the preview |
 | `storeautopilot preview` | Opens the store preview with the last images |
 | `storeautopilot release` | Builds, uploads and updates the store listings |
 | `storeautopilot submit` | Sends the release for App Store review and to Google Play production |
 | `storeautopilot rollout 50` | Widens a staged Google Play rollout; 100 finishes it |
+| `storeautopilot rollout watch` | Halts a staged Google Play rollout whose crash rate is too high |
 | `storeautopilot runner install` | Connects this Mac to the repository as its runner |
 
 Options: `--config PATH`, `--only ios|android`, `--skip-shots` (release), `--fresh-shots` (release and shots),
@@ -370,7 +385,19 @@ Every command writes a log to `~/Library/Logs/StoreAutopilot/` with everything i
 Flutter, Xcode and fastlane. The last 30 logs are kept. When something fails you see one line saying what went wrong,
 a hint on how to fix it, and the path of the log.
 
-Most setup problems are caught by `storeautopilot doctor --online` before you push. During a run:
+Most setup problems are caught by `storeautopilot doctor --online` before you push. It also looks for what gets apps
+rejected most often, as far as the project shows it:
+
+- **Store rules that change over time:** Google Play's target SDK (API 36 since August 31, 2026), Xcode 26 or later,
+  iOS 13 or later. A rule already in force stops the release before the build; an upcoming one is a warning with its
+  date.
+- **Crashes on launch or first use:** a missing AdMob app id (iOS and Android), missing permission texts for camera,
+  photos, location, Face ID and similar packages, tracking declared without its prompt text.
+- **Account deletion:** with a sign-in package, Apple requires deleting the account inside the app; `doctor` reminds
+  you to say where in `review_notes`.
+- **Privacy manifest:** a note when `ios/Runner/PrivacyInfo.xcprivacy` is missing.
+
+During a run:
 
 - **A stuck command is stopped.** No command waits for keyboard input, and one that prints nothing for 30 minutes
   (an app frozen in its screenshot test, say) is stopped with everything it started, so the runner is free again.
