@@ -6,7 +6,10 @@ module StoreAutopilot
   # store.md: YAML front matter + `# <locale>` sections with `## <field>` subsections.
   # Field bodies are plain text; don't start lines with '#' inside them.
   class Listing
-    FIELDS = %w[name subtitle keywords promotional_text description short_description release_notes captions].freeze
+    TEXT_FIELDS = %w[name subtitle keywords promotional_text description short_description release_notes].freeze
+    # `## ios_description` / `## android_description` replace `## description` in that store only.
+    STORE_PREFIXES = { ios: "ios_", android: "android_" }.freeze
+    FIELDS = (TEXT_FIELDS + ["captions"] + TEXT_FIELDS.flat_map { |k| STORE_PREFIXES.values.map { |pre| "#{pre}#{k}" } }).freeze
     LIMITS = {
       ios: { "name" => 30, "subtitle" => 30, "keywords" => 100, "promotional_text" => 170, "description" => 4000, "release_notes" => 4000 },
       android: { "name" => 30, "short_description" => 80, "description" => 4000, "release_notes" => 500 }
@@ -66,6 +69,16 @@ module StoreAutopilot
       @locales = locales
     end
 
+    # The text of one language as one store shows it: a store-specific section (`ios_description`) wins over the shared one.
+    def fields_for(id, platform)
+      fields = locales[id] || {}
+      prefix = STORE_PREFIXES.fetch(platform)
+      TEXT_FIELDS.to_h do |k|
+        own = fields["#{prefix}#{k}"].to_s
+        [k, own.empty? ? fields[k] : own]
+      end.merge("captions" => fields["captions"]).compact
+    end
+
     def validate!(config)
       problems = []
       config.platforms.each do |p|
@@ -74,16 +87,16 @@ module StoreAutopilot
       problems.concat(review_problems) if config.ios?
       problems.concat(Privacy.from(self)&.problems || [])
       config.locales.each_key do |id|
-        fields = locales[id]
-        next problems << "missing `# #{id}` section" unless fields
+        next problems << "missing `# #{id}` section" unless locales[id]
         config.platforms.each do |p|
+          fields = fields_for(id, p)
           REQUIRED[p].each { |k| problems << "#{id}/#{k}: required for #{p}" if fields[k].to_s.empty? }
           LIMITS[p].each do |k, max|
             len = fields[k].to_s.length
             problems << "#{id}/#{k}: #{len} characters, #{p} allows #{max}" if len > max
           end
         end
-        captions = fields["captions"] || {}
+        captions = locales[id]["captions"] || {}
         config.screenshots.each { |s| problems << "#{id}/captions: no caption for `#{s}`" unless captions[s] }
       end
       return self if problems.empty?
@@ -98,7 +111,7 @@ module StoreAutopilot
       list = APPLE_URLS.select { |k| meta[k].to_s.include?("//example.com") }
                        .map { |k| "#{k} is still the example address from `init`; App Review opens it" }
       config.locales.each_key do |id|
-        fields = locales[id] || {}
+        fields = fields_for(id, :ios)
         if config.ios?
           list.concat(keyword_advice(id, fields))
           words = ->(text) { text.to_s.downcase.scan(/[[:alnum:]]+/) }
@@ -106,7 +119,7 @@ module StoreAutopilot
           list << "#{id}/subtitle repeats #{repeated.join(', ')} from the name; other words reach more searches" if repeated.any?
         end
         list << "#{id}/release_notes is empty; the App Store requires it for every update" if config.ios? && fields["release_notes"].to_s.empty?
-        (fields["captions"] || {}).each do |shot, caption|
+        (locales[id] || {}).fetch("captions", {}).each do |shot, caption|
           next if caption.length <= CAPTION_COMFORT
           list << "#{id}/captions/#{shot}: #{caption.length} characters may wrap to three lines; check `storeautopilot shots`"
         end
@@ -175,7 +188,7 @@ module StoreAutopilot
         File.chmod(0o600, File.join(review, "demo_password.txt"))
       end
       config.locales.each do |id, codes|
-        fields = locales.fetch(id)
+        fields = fields_for(id, :ios)
         ldir = File.join(dir, codes[:apple])
         APPLE_TEXT.each { |k| put(ldir, "#{k}.txt", fields[k]) }
         APPLE_URLS.each { |k| put(ldir, "#{k}.txt", meta[k]) }
@@ -186,7 +199,7 @@ module StoreAutopilot
     # fastlane supply metadata folder (images are added by Images).
     def write_play(dir, config, version_code:)
       config.locales.each do |id, codes|
-        fields = locales.fetch(id)
+        fields = fields_for(id, :android)
         ldir = File.join(dir, codes[:play])
         put(ldir, "title.txt", fields["name"])
         put(ldir, "short_description.txt", fields["short_description"])
@@ -198,7 +211,7 @@ module StoreAutopilot
 
     # Apple locale code → release notes, for TestFlight's "What to Test".
     def testflight_notes(config)
-      config.locales.to_h { |id, codes| [codes[:apple], locales.fetch(id)["release_notes"].to_s] }.reject { |_, t| t.empty? }
+      config.locales.to_h { |id, codes| [codes[:apple], fields_for(id, :ios)["release_notes"].to_s] }.reject { |_, t| t.empty? }
     end
 
     # deliver's app_rating_config_path JSON, from front matter `age_rating`.

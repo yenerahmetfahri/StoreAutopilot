@@ -484,6 +484,59 @@ class PipelineTest < Minitest::Test
       assert_equal ["ios submit", "android promote"], lanes(shell)
     end
   end
+
+  def test_skip_text_leaves_the_store_text_alone_but_still_uploads_the_build
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      make_secrets(home)
+      config = StoreAutopilot::Config.load(make_app(dir))
+      shell = fake_shell
+      StoreAutopilot::Pipeline.new(config: config, shell: shell, platforms: [:ios], skip_shots: true, skip_text: true, home: home).release
+      assert_equal ["ios status", "ios upload"], lanes(shell)
+
+      # Nothing was recorded, so a later release without the flag still sends the text.
+      shell2 = fake_shell
+      StoreAutopilot::Pipeline.new(config: config, shell: shell2, platforms: [:ios], skip_shots: true, home: home).release
+      assert_equal ["ios status", "ios upload", "ios metadata"], lanes(shell2)
+    end
+  end
+
+  def test_skip_text_on_play_sends_no_listing_text
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      make_secrets(home)
+      config = StoreAutopilot::Config.load(make_app(dir))
+      shell = fake_shell
+      pipeline = StoreAutopilot::Pipeline.new(config: config, shell: shell, platforms: [:android], skip_shots: true, skip_text: true, home: home)
+      pipeline.define_singleton_method(:upload_android) { |*| nil }
+      pipeline.release
+      assert_equal ["android status"], lanes(shell)
+    end
+  end
+
+  def test_dry_run_plan_says_text_is_skipped
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      make_secrets(home)
+      config = StoreAutopilot::Config.load(make_app(dir))
+      StoreAutopilot::UI.out = (out = StringIO.new)
+      StoreAutopilot::Pipeline.new(config: config, shell: fake_shell, platforms: [:ios], skip_shots: true, skip_text: true,
+                                   dry_run: true, home: home).release
+      assert_includes out.string, "leave the App Store listing as it is"
+    end
+  end
+
+  def test_release_explains_a_build_number_that_differs_from_pubspec
+    Dir.mktmpdir do |dir|
+      home = File.join(dir, "home")
+      make_secrets(home)
+      config = StoreAutopilot::Config.load(make_app(dir)) # pubspec says 1.2.3+4, TestFlight has 7
+      StoreAutopilot::UI.out = (out = StringIO.new)
+      StoreAutopilot::Pipeline.new(config: config, shell: fake_shell, platforms: [:ios], skip_shots: true, home: home).release
+      assert_includes out.string, "Build number 8 comes from the stores"
+      assert_includes out.string, "+4 is not used"
+    end
+  end
 end
 
 class ReviewsTest < Minitest::Test

@@ -26,24 +26,39 @@ module StoreAutopilot
         --config PATH       storeautopilot.yml path (default: ./storeautopilot.yml)
         --only ios|android  One platform only
         --skip-shots        release: don't capture or upload screenshots
+        --skip-text         release: don't change the store text (name, description, keywords…); builds still go up
         --fresh-shots       release/shots: capture again even if the app is unchanged
         --dry-run           release/submit: validate and print the plan only
         --online            doctor: check store access, the app records and the version
         --app DIR           init: one app of several in this repository (its folder)
+        --name TEXT         init: app name in the stores
+        --languages LIST    init: comma-separated, e.g. en,de
+        --support-url URL   init: support page
+        --privacy-url URL   init: privacy policy page
+        --category NAME     init: App Store category, e.g. productivity
+        --color #RRGGBB     init: brand color of the store images
+        (init asks for these when run in a terminal; the options answer without asking)
     TXT
 
     def self.start(argv) = new.start(argv)
 
     def start(argv)
-      opts = { config: "storeautopilot.yml", only: nil, dry_run: false, skip_shots: false, online: false, fresh_shots: false, app: nil }
+      opts = { config: "storeautopilot.yml", only: nil, dry_run: false, skip_shots: false, skip_text: false, online: false, fresh_shots: false, app: nil }
       parser = OptionParser.new do |o|
         o.on("--config PATH") { |v| opts[:config] = v }
         o.on("--only PLATFORM", %w[ios android]) { |v| opts[:only] = v.to_sym }
         o.on("--skip-shots") { opts[:skip_shots] = true }
+        o.on("--skip-text") { opts[:skip_text] = true }
         o.on("--fresh-shots") { opts[:fresh_shots] = true }
         o.on("--dry-run") { opts[:dry_run] = true }
         o.on("--online") { opts[:online] = true }
         o.on("--app DIR") { |v| opts[:app] = v }
+        o.on("--name TEXT") { |v| opts[:name] = v }
+        o.on("--languages LIST") { |v| opts[:languages] = v }
+        o.on("--support-url URL") { |v| opts[:support_url] = v }
+        o.on("--privacy-url URL") { |v| opts[:privacy_url] = v }
+        o.on("--category NAME") { |v| opts[:category] = v }
+        o.on("--color HEX") { |v| opts[:color] = v }
         o.on("-h", "--help") { opts[:help] = true }
         o.on("-v", "--version") { opts[:version] = true }
       end

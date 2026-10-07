@@ -21,10 +21,9 @@ module StoreAutopilot
 
     def html
       sections = @config.locales.map do |id, codes|
-        fields = @listing.locales[id] || {}
         stores = []
-        stores << apple(fields, codes[:apple]) if @config.ios?
-        stores << play(fields, codes[:play]) if @config.android?
+        stores << apple(@listing.fields_for(id, :ios), codes[:apple]) if @config.ios?
+        stores << play(@listing.fields_for(id, :android), codes[:play]) if @config.android?
         %(<section><h2>#{h(id)}</h2><div class="stores">#{stores.join}</div></section>)
       end
       advice = @config.feature?(:text_advice) ? @listing.advice(@config) : []

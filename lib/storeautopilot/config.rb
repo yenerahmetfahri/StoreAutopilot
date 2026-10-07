@@ -112,6 +112,11 @@ module StoreAutopilot
       version.split("+").first
     end
 
+    # The +N in pubspec.yaml's version, or nil. A release does not use it (see Pipeline#next_build_number).
+    def pubspec_build_number
+      File.read(File.join(flutter_dir, "pubspec.yaml"))[/^version:\s*\S+?\+(\d+)/, 1]&.to_i
+    end
+
     private
 
     def parse_features(raw, problems)

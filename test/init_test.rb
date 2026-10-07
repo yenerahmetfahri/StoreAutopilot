@@ -84,6 +84,36 @@ class InitTest < Minitest::Test
       assert_includes err.message, "pubspec.yaml"
     end
   end
+
+  def test_command_line_answers_replace_the_placeholders_without_a_terminal
+    Dir.mktmpdir do |dir|
+      make_flutter_repo(dir)
+      StoreAutopilot::UI.out = (out = StringIO.new)
+      given = { name: "Word Game", languages: "en,de", support_url: "https://acme.test/help", privacy_url: "https://acme.test/privacy",
+                category: "word games", color: "#112233" }
+      assert_raises(StoreAutopilot::Error) { StoreAutopilot::Init.new(dir: dir, shell: FakeShell.new, home: File.join(dir, "home"), given: given.merge(category: "nope")).run }
+      StoreAutopilot::Init.new(dir: dir, shell: FakeShell.new, home: File.join(dir, "home"), given: given.merge(category: "games")).run
+
+      yml = File.read(File.join(dir, "storeautopilot.yml"))
+      assert_includes yml, "de: { apple: de-DE, play: de-DE }"
+      assert_includes yml, "#112233"
+      md = File.read(File.join(dir, "store.md"))
+      assert_includes md, "support_url: https://acme.test/help"
+      assert_includes md, "apple_category: GAMES"
+      refute_includes out.string, "example.com addresses"
+    end
+  end
+
+  def test_without_answers_init_lists_what_is_still_a_placeholder
+    Dir.mktmpdir do |dir|
+      make_flutter_repo(dir)
+      StoreAutopilot::UI.out = (out = StringIO.new)
+      StoreAutopilot::Init.new(dir: dir, shell: FakeShell.new, home: File.join(dir, "home")).run
+      assert_includes out.string, "Still placeholders"
+      assert_includes out.string, "example.com addresses"
+      assert_includes out.string, "--category"
+    end
+  end
 end
 
 class InitMonorepoTest < Minitest::Test

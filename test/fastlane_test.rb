@@ -66,4 +66,36 @@ class FastlaneTest < Minitest::Test
   def test_fastfile_is_valid_ruby
     assert system("ruby", "-c", File.join(StoreAutopilot::ROOT, "fastlane", "Fastfile"), out: File::NULL)
   end
+
+  PERMISSION_DENIED = "Google Api Error: forbidden: The caller does not have permission"
+
+  def test_a_denied_play_call_names_the_permission_it_needs
+    Dir.mktmpdir do |work|
+      shell = FakeShell.new
+      shell.on_run { raise StoreAutopilot::Error.new("Command failed (exit 1): fastlane android upload", output: PERMISSION_DENIED) }
+      err = assert_raises(StoreAutopilot::Error) do
+        StoreAutopilot::Fastlane.new(shell: shell, workdir: work).lane(:android, :upload, { "track" => "internal" })
+      end
+      assert_includes err.hint, "Release apps to testing tracks"
+      assert_includes err.hint, "service account"
+    end
+  end
+
+  def test_a_denied_play_result_gets_the_same_explanation
+    Dir.mktmpdir do |work|
+      shell = FakeShell.new
+      shell.on_run { |_cmd, env| File.write(JSON.parse(File.read(env["STOREAUTOPILOT_JOB"]))["output"], JSON.generate(error: PERMISSION_DENIED)) }
+      result = StoreAutopilot::Fastlane.new(shell: shell, workdir: work).lane(:android, :status, {})
+      assert_includes result["error"], "View app information"
+    end
+  end
+
+  def test_other_errors_are_left_alone
+    Dir.mktmpdir do |work|
+      shell = FakeShell.new
+      shell.on_run { raise StoreAutopilot::Error.new("Command failed", hint: "See the output above.", output: "boom") }
+      err = assert_raises(StoreAutopilot::Error) { StoreAutopilot::Fastlane.new(shell: shell, workdir: work).lane(:android, :upload, {}) }
+      assert_equal "See the output above.", err.hint
+    end
+  end
 end

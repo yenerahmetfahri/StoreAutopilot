@@ -5,6 +5,7 @@ module StoreAutopilot
   class Shell
     # A command that prints nothing for this long is taken to be stuck (e.g. an app frozen in its screenshot test).
     IDLE_TIMEOUT = 30 * 60
+    TAIL_LINES = 60 # kept from a command's output, to explain a failure
 
     def initialize(env: {}, idle_timeout: IDLE_TIMEOUT)
       @env = env
@@ -17,10 +18,18 @@ module StoreAutopilot
     def run(*cmd, chdir: nil, env: {})
       opts = { pgroup: true } # own process group, so a stuck command can be stopped with everything it started
       opts[:chdir] = chdir if chdir
+      tail = []
       status = Open3.popen2e(@env.merge(env), *cmd, **opts) do |stdin, out, wait|
         stdin.close
         last_output = Time.now
-        reader = Thread.new { out.each_line { |line| last_output = Time.now; UI.output(line.scrub) } }
+        reader = Thread.new do
+          out.each_line do |line|
+            last_output = Time.now
+            tail << line.scrub
+            tail.shift if tail.size > TAIL_LINES
+            UI.output(line.scrub)
+          end
+        end
         begin
           until wait.join(1)
             next if Time.now - last_output < @idle_timeout
@@ -36,7 +45,7 @@ module StoreAutopilot
         wait.value
       end
       return true if status.success?
-      raise Error.new("Command failed (#{exit_reason(status)}): #{label(cmd)}", hint: "See the output above.")
+      raise Error.new("Command failed (#{exit_reason(status)}): #{label(cmd)}", hint: "See the output above.", output: tail.join)
     rescue Errno::ENOENT, Errno::EACCES => e
       raise Error.new("Could not start #{label(cmd)}: #{e.message}", hint: "Run `storeautopilot doctor` to check installed tools.")
     end

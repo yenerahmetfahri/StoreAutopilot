@@ -4,13 +4,14 @@ module StoreAutopilot
   class Pipeline
     def self.work_dir(home, app_id) = File.join(home, "Library", "Caches", "StoreAutopilot", app_id)
 
-    def initialize(config:, shell:, platforms: config.platforms, dry_run: false, skip_shots: false, fresh_shots: false,
+    def initialize(config:, shell:, platforms: config.platforms, dry_run: false, skip_shots: false, skip_text: false, fresh_shots: false,
                    home: Dir.home, screenshots: nil, compose: nil)
       @config = config
       @shell = shell
       @platforms = platforms & config.platforms
       @dry_run = dry_run
       @skip_shots = skip_shots
+      @skip_text = skip_text
       @fresh_shots = fresh_shots
       @home = home
       @secrets = Secrets.new(config.app_id, home: home)
@@ -45,6 +46,7 @@ module StoreAutopilot
       number = uploaded.values.max if uploaded.any? # a re-run continues with the build number already in use
       @state.record("build_number", number)
       UI.step("Version #{@config.version_name} (#{number})")
+      explain_build_number(number)
       @platforms.each do |p|
         capture_and_compose(p, listing) unless @skip_shots
         capture_and_compose(:ipad, listing) if p == :ios && @config.ipad? && !@skip_shots
@@ -263,7 +265,9 @@ module StoreAutopilot
           steps << "capture and compose #{shots} on the iPad simulator" if p == :ios && @config.ipad?
         end
         steps << (p == :ios ? "build the iOS app and upload it to TestFlight" : "build the Android app bundle and upload it to the #{@config.android[:track]} track")
-        steps << "update the #{p == :ios ? 'App Store' : 'Google Play'} listing if text or images changed"
+        store = p == :ios ? "App Store" : "Google Play"
+        changed = [("text" unless @skip_text), ("images" unless @skip_shots)].compact.join(" or ")
+        steps << (changed.empty? ? "leave the #{store} listing as it is (--skip-text and --skip-shots)" : "update the #{store} listing if #{changed} changed")
       end
       steps
     end
@@ -285,6 +289,14 @@ module StoreAutopilot
       report.call(title: "#{what} failed", ok: false, detail: e.message, hint: (e.hint if e.respond_to?(:hint)))
       UI.notify("✗ #{what} failed: #{e.message.lines.first.to_s.strip}")
       raise
+    end
+
+    # The number sent to the stores is the newest one they hold plus one, not pubspec.yaml's +N, so it never collides.
+    def explain_build_number(number)
+      pubspec = @config.pubspec_build_number
+      return if pubspec.nil? || pubspec == number
+      UI.info("Build number #{number} comes from the stores (newest + 1); pubspec.yaml's +#{pubspec} is not used. " \
+              "Only the version name #{@config.version_name} is read from it.")
     end
 
     # Asks the stores for their state before anything is built: a closed version or a missing app fails here, in
@@ -430,9 +442,9 @@ module StoreAutopilot
       shots = File.join(store_dir, "ios", "screenshots")
       text_digest = State.digest(meta)
       shots_digest = State.digest(shots)
-      text = @state.changed?("ios_text", text_digest)
+      text = !@skip_text && @state.changed?("ios_text", text_digest)
       images = !@skip_shots && @state.changed?("ios_shots", shots_digest)
-      return UI.ok("App Store listing unchanged") unless text || images
+      return UI.ok(listing_left_alone("App Store")) unless text || images
       UI.step("iOS: updating App Store listing (#{[('text' if text), ('screenshots' if images)].compact.join(' + ')})")
       @fastlane.lane(:ios, :metadata, ios_job(version: @config.version_name, metadata_path: (meta if text),
                                               screenshots_path: (shots if images),
@@ -469,14 +481,18 @@ module StoreAutopilot
       meta = play_metadata(listing, number)
       text_digest = State.digest(meta, except: %r{(\A|/)(changelogs|images)/})
       images_digest = State.digest(meta, only: %r{(\A|/)images/})
-      text = @state.changed?("android_text", text_digest)
+      text = !@skip_text && @state.changed?("android_text", text_digest)
       images = !@skip_shots && @state.changed?("android_images", images_digest)
-      return UI.ok("Google Play listing unchanged") unless text || images
+      return UI.ok(listing_left_alone("Google Play")) unless text || images
       UI.step("Android: updating Google Play listing (#{[('text' if text), ('images' if images)].compact.join(' + ')})")
       @fastlane.lane(:android, :metadata, android_job(metadata_path: meta, text: text, images: images,
                                                      track: @config.android[:track]), retries: retries(1))
       @state.record("android_text", text_digest) if text
       @state.record("android_images", images_digest) if images
+    end
+
+    def listing_left_alone(store)
+      @skip_text && @skip_shots ? "#{store} listing left as it is (--skip-text, --skip-shots)" : "#{store} listing unchanged"
     end
 
     def ios_job(**extra)

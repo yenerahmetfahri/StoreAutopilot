@@ -42,12 +42,17 @@ module StoreAutopilot
         yield "#{id}: App Store has no #{codes[:apple]} text" if config.ios? && a.empty? && block_given?
         yield "#{id}: Google Play has no #{codes[:play]} listing" if config.android? && p.empty? && block_given?
         if a["description"] && p["description"] && a["description"].strip != p["description"].strip && block_given?
-          yield "#{id}: the stores have different descriptions; store.md keeps the App Store one for both"
+          yield "#{id}: the stores have different descriptions; store.md keeps both (`## description` and `## android_description`)"
         end
         if a["name"] && p["name"] && a["name"].strip != p["name"].strip && block_given?
-          yield "#{id}: the stores have different names (#{a['name']} / #{p['name']}); store.md keeps the App Store one"
+          yield "#{id}: the stores have different names (#{a['name']} / #{p['name']}); store.md keeps both (`## name` and `## android_name`)"
         end
         fields = p.slice(*PLAY_FIELDS).merge(a.slice(*APPLE_FIELDS)) { |_k, play_value, apple_value| apple_value || play_value }
+        # What differs between the stores stays different: the Play text goes under its own android_ section.
+        %w[name description].each do |k|
+          next unless a[k].to_s.strip != "" && p[k].to_s.strip != "" && a[k].strip != p[k].strip
+          fields["android_#{k}"] = p[k]
+        end
         captions = existing&.locales&.dig(id, "captions") || {}
         section(id, fields, config.screenshots.to_h { |s| [s, captions[s] || "Caption for #{s}"] })
       end
@@ -63,6 +68,8 @@ module StoreAutopilot
       out = +"# #{id}\n"
       Listing::FIELDS.each do |field|
         next if field == "captions"
+        store_specific = Listing::STORE_PREFIXES.values.any? { |pre| field.start_with?(pre) }
+        next if store_specific && fields[field].to_s.strip.empty?
         out << "## #{field}\n"
         out << "#{fields[field].to_s.strip.gsub(/^#/, ' #')}\n" unless fields[field].to_s.strip.empty?
       end

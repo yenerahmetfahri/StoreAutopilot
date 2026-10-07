@@ -32,12 +32,15 @@ module StoreAutopilot
     # prompt: ask the developer (a Prompt); nil fills in placeholders to edit later.
     # dir: the repository's top folder. app: for a repository with several apps, the app's folder in it; that app's
     # files go there and its workflow (store-<app_id>.yml, branch release-<app_id>) next to the others.
-    def initialize(dir:, shell:, home: Dir.home, prompt: nil, app: nil)
+    # given: answers from the command line (:name, :languages, :support_url, :privacy_url, :category, :color); they are
+    # used as they are and not asked again.
+    def initialize(dir:, shell:, home: Dir.home, prompt: nil, app: nil, given: {})
       @dir = File.expand_path(dir)
       @shell = shell
       @home = home
       @prompt = prompt
       @app = app && app.delete_suffix("/")
+      @given = given.compact
     end
 
     def run
@@ -46,6 +49,7 @@ module StoreAutopilot
       flutter = File.join(@dir, app_dir, flutter_rel)
       vars = detect(flutter).merge(flutter_project: flutter_rel)
       vars = answers(vars)
+      left = placeholders_left(vars)
       branch = own ? "release-#{vars[:app_id]}" : "release"
       vars.merge!(workflow_name: own ? "Store (#{vars[:app_id]})" : "Store", branch: branch,
                   config_arg: own ? " --config #{app_dir}/storeautopilot.yml" : "")
@@ -63,7 +67,7 @@ module StoreAutopilot
       secrets = Secrets.new(vars[:app_id], home: @home)
       secrets.ensure_dir!
       UI.ok("secret folder #{secrets.dir} (private)")
-      next_steps(secrets, branch, own ? app_dir : nil)
+      next_steps(secrets, branch, own ? app_dir : nil, left)
     end
 
     private
@@ -73,7 +77,7 @@ module StoreAutopilot
 
     # Turns the answers (or defaults) into template values.
     def answers(vars)
-      a = DEFAULTS.merge(@prompt ? ask(vars) : {})
+      a = DEFAULTS.merge(@prompt ? ask(vars) : given_answers(vars))
       locales = a[:languages].map do |id|
         apple, play = LANGUAGES.fetch(id) { UI.warn("#{id}: unknown language; check its store codes in storeautopilot.yml"); [id, id] }
         "  #{id}: { apple: #{apple}, play: #{play} }"
@@ -93,21 +97,46 @@ module StoreAutopilot
       )
     end
 
+    # Without a terminal: the command-line answers, everything else stays a placeholder.
+    def given_answers(vars)
+      vars[:app_name] = @given[:name] if @given[:name]
+      a = {}
+      a[:languages] = split_languages(@given[:languages]) if @given[:languages]
+      a[:support_url] = @given[:support_url] if @given[:support_url]
+      a[:privacy_url] = @given[:privacy_url] if @given[:privacy_url]
+      a[:category] = category_named(@given[:category]) if @given[:category]
+      a[:background] = valid_color(@given[:color]) if @given[:color]
+      a
+    end
+
+    def split_languages(text) = text.split(",").map { |l| l.strip.downcase }.reject(&:empty?)
+    def valid_color(text) = text.match?(/\A#\h{6}\z/) ? text : raise(Error.new("--color #{text}: not a color.", hint: "Use #RRGGBB, e.g. #1E3A8A."))
+
+    def category_named(name)
+      id = name.strip.upcase.tr(" -", "__")
+      CATEGORIES.include?(id) ? id : raise(Error.new("--category #{name}: not a category.", hint: "One of: #{CATEGORIES.map { |c| c.downcase.tr('_', ' ') }.join(', ')}."))
+    end
+
     def ask(vars)
       UI.step("A few questions (Enter keeps the suggestion; everything can be changed later in the files)")
-      a = {}
-      vars[:app_name] = @prompt.ask("App name in the stores", default: vars[:app_name])
-      a[:languages] = @prompt.ask("Languages, comma-separated (#{LANGUAGES.keys.first(8).join(', ')}…)", default: "en")
-                             .split(",").map { |l| l.strip.downcase }.reject(&:empty?)
-      a[:support_url] = @prompt.ask("Support page URL (a page where users can reach you)", default: DEFAULTS[:support_url])
-      a[:privacy_url] = @prompt.ask("Privacy policy URL", default: DEFAULTS[:privacy_url])
-      UI.info(CATEGORIES.each_with_index.map { |c, i| "#{i + 1}. #{c.downcase.tr('_', ' ')}" }.each_slice(6).map { |row| row.join("  ") }.join("\n  "))
-      choice = @prompt.ask("App Store category (number, Enter to skip)").to_i
-      a[:category] = CATEGORIES[choice - 1] if choice.between?(1, CATEGORIES.size)
+      a = given_answers(vars)
+      vars[:app_name] = @prompt.ask("App name in the stores", default: vars[:app_name]) unless @given[:name]
+      unless a[:languages]
+        a[:languages] = split_languages(@prompt.ask("Languages, comma-separated (#{LANGUAGES.keys.first(8).join(', ')}…)", default: "en"))
+      end
+      a[:support_url] ||= @prompt.ask("Support page URL (a page where users can reach you)", default: DEFAULTS[:support_url])
+      a[:privacy_url] ||= @prompt.ask("Privacy policy URL", default: DEFAULTS[:privacy_url])
+      unless @given[:category]
+        UI.info(CATEGORIES.each_with_index.map { |c, i| "#{i + 1}. #{c.downcase.tr('_', ' ')}" }.each_slice(6).map { |row| row.join("  ") }.join("\n  "))
+        choice = @prompt.ask("App Store category (number, Enter to skip)").to_i
+        a[:category] = CATEGORIES[choice - 1] if choice.between?(1, CATEGORIES.size)
+      end
       a[:third_party_content] = @prompt.yes?("Does the app show content it doesn't own (others' text, images, music)?")
       a[:uses_encryption] = @prompt.yes?("Does it use encryption beyond what iOS provides (HTTPS, Keychain)?")
-      a[:background] = @prompt.ask("Brand color for the store images (#RRGGBB)", default: DEFAULTS[:background])
-      a[:background] = DEFAULTS[:background] unless a[:background].match?(/\A#\h{6}\z/)
+      unless a[:background]
+        a[:background] = @prompt.ask("Brand color for the store images (#RRGGBB)", default: DEFAULTS[:background])
+        a[:background] = DEFAULTS[:background] unless a[:background].match?(/\A#\h{6}\z/)
+      end
       a[:languages] = DEFAULTS[:languages] if a[:languages].empty?
       a
     end
@@ -179,7 +208,22 @@ module StoreAutopilot
       UI.ok("added key/credential rules to .gitignore")
     end
 
-    def next_steps(secrets, branch, app_dir)
+    # What the files still hold as an example, so nothing slips into a release unnoticed. Only worth listing when init
+    # could not ask (no terminal) or was given only some answers.
+    def placeholders_left(vars)
+      list = []
+      list << "support_url and privacy_url are example.com addresses (--support-url, --privacy-url)" if vars[:support_url].include?("//example.com") || vars[:privacy_url].include?("//example.com")
+      list << "store.md still has the sample texts: subtitle, keywords, description, short_description"
+      list << "the app name is #{vars[:app_name]}, guessed from pubspec.yaml (--name)" unless @given[:name] || @prompt
+      list << "apple_category is not set (--category)" unless vars[:category_line].start_with?("apple_category")
+      list
+    end
+
+    def next_steps(secrets, branch, app_dir, left = [])
+      unless left.empty?
+        UI.step("Still placeholders (storeautopilot.yml and store.md)")
+        left.each { |l| UI.warn(l) }
+      end
       UI.step("Next")
       UI.info("1. Edit #{app_dir ? "#{app_dir}/" : ''}storeautopilot.yml and store.md")
       UI.info("2. Fill in #{Screenshots::TEST} (navigate to each screen)")

@@ -1,15 +1,17 @@
 module StoreAutopilot
-  VERSION = "1.1.0"
+  VERSION = "1.2.0"
   ROOT = File.expand_path("..", __dir__)
   TEMPLATES = File.join(ROOT, "templates")
 
   # A problem the user can fix; `hint` says how.
   class Error < StandardError
-    attr_reader :hint
+    # output: the last lines a failed command printed, for callers that can explain them.
+    attr_reader :hint, :output
 
-    def initialize(message, hint: nil)
+    def initialize(message, hint: nil, output: nil)
       super(message)
       @hint = hint
+      @output = output
     end
   end
 end

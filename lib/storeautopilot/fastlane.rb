@@ -2,6 +2,27 @@ require "json"
 require "fileutils"
 
 module StoreAutopilot
+  # Google's "caller does not have permission" names no permission. This says which one the lane needs.
+  module PlayPermissions
+    DENIED = /caller does not have permission/i
+    READ = "View app information and download bulk reports (read-only)"
+    PRODUCTION = "Release to production, exclude devices, and use Play App Signing"
+    NEEDED = {
+      status: READ, listing: READ, vitals: "View app quality information (read-only)",
+      reviews: "Reply to reviews", reply: "Reply to reviews", data_safety: "Manage store presence",
+      metadata: "Manage store presence and Release apps to testing tracks",
+      promote: PRODUCTION, rollout: PRODUCTION, halt: PRODUCTION
+    }.freeze
+
+    def self.denied?(text) = text.to_s.match?(DENIED)
+
+    def self.hint(lane, job)
+      needed = NEEDED[lane] || (job["track"] == "production" ? PRODUCTION : "Release apps to testing tracks")
+      "Google Play denied `#{lane}`. In Play Console → Users and permissions, give the service account (client_email in " \
+        "play.json) this app permission: #{needed}. A new permission can take a while to apply."
+    end
+  end
+
   # Hands a lane its data through a private JSON file (paths only, never key contents).
   class Fastlane
     def initialize(shell:, workdir:, retry_delay: 30)
@@ -18,10 +39,12 @@ module StoreAutopilot
         last = attempt == retries
         begin
           result = run_lane(platform, name, job, quiet)
+          explain_denial(result, name, job) if platform == :android
           return result if last || !result["error"]
           reason = result["error"]
         rescue Error => e
-          raise if last
+          e = explained(e, name, job) if platform == :android
+          raise e if last
           reason = e.message
         end
         UI.warn("fastlane #{platform} #{name}: #{reason.lines.first.to_s.strip} — trying again in #{@retry_delay}s")
@@ -30,6 +53,18 @@ module StoreAutopilot
     end
 
     private
+
+    # Adds the missing permission to a denied Google Play call (in a lane's error result, or in a failed command).
+    def explain_denial(result, name, job)
+      note = " (#{PlayPermissions.hint(name, job)})"
+      result["error"] = "#{result['error']}#{note}" if PlayPermissions.denied?(result["error"])
+      (result["errors"] || {}).each { |track, text| result["errors"][track] = "#{text}#{note}" if PlayPermissions.denied?(text) }
+    end
+
+    def explained(error, name, job)
+      return error unless PlayPermissions.denied?(error.output) || PlayPermissions.denied?(error.message)
+      Error.new(error.message, hint: PlayPermissions.hint(name, job), output: error.output)
+    end
 
     def run_lane(platform, name, job, quiet)
       FileUtils.mkdir_p(@workdir)

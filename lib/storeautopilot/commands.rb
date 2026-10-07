@@ -11,10 +11,13 @@ module StoreAutopilot
     def pipeline(opts)
       c = config(opts)
       Pipeline.new(config: c, shell: shell, platforms: opts[:only] ? [opts[:only]] : c.platforms,
-                   dry_run: opts[:dry_run], skip_shots: opts[:skip_shots], fresh_shots: opts[:fresh_shots], home: home)
+                   dry_run: opts[:dry_run], skip_shots: opts[:skip_shots], skip_text: opts[:skip_text], fresh_shots: opts[:fresh_shots], home: home)
     end
 
-    def init(_args, opts) = Init.new(dir: Dir.pwd, shell: shell, home: home, prompt: ($stdin.tty? ? Prompt.new : nil), app: opts[:app]).run
+    def init(_args, opts)
+      given = opts.slice(:name, :languages, :support_url, :privacy_url, :category, :color)
+      Init.new(dir: Dir.pwd, shell: shell, home: home, prompt: ($stdin.tty? ? Prompt.new : nil), app: opts[:app], given: given).run
+    end
 
     def import(_args, opts)
       c = config(opts)

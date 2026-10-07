@@ -120,4 +120,33 @@ class ListingAdviceTest < Minitest::Test
     assert_includes text, "release_notes is empty"
     assert_includes text, "captions/01_home: 66 characters"
   end
+
+  def split_listing
+    md = Fixtures::VALID_MD.sub("## release_notes", "## android_description\nThe Play description.\n## release_notes")
+    StoreAutopilot::Listing.parse(md)
+  end
+
+  def test_a_store_section_replaces_the_shared_text_in_that_store_only
+    l = split_listing
+    assert_equal "The demo app description.", l.fields_for("en", :ios)["description"]
+    assert_equal "The Play description.", l.fields_for("en", :android)["description"]
+    assert_equal "Demo App", l.fields_for("en", :android)["name"]
+    Dir.mktmpdir do |dir|
+      config = StoreAutopilot::Config.load(make_app(dir))
+      apple = l.write_apple(File.join(dir, "apple"), config)
+      play = l.write_play(File.join(dir, "play"), config, version_code: 1)
+      assert_equal "The demo app description.\n", File.read(File.join(apple, "en-US", "description.txt"))
+      assert_equal "The Play description.\n", File.read(File.join(play, "en-US", "full_description.txt"))
+    end
+  end
+
+  def test_store_sections_are_checked_against_that_stores_limits
+    md = Fixtures::VALID_MD.sub("## release_notes", "## android_name\n#{'N' * 31}\n## release_notes")
+    Dir.mktmpdir do |dir|
+      config = StoreAutopilot::Config.load(make_app(dir))
+      err = assert_raises(StoreAutopilot::Error) { StoreAutopilot::Listing.parse(md).validate!(config) }
+      assert_includes err.message, "en/name: 31 characters, android allows 30"
+      refute_includes err.message, "ios allows"
+    end
+  end
 end

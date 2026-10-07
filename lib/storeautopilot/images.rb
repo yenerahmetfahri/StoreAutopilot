@@ -14,6 +14,7 @@ module StoreAutopilot
       width, height = SIZES.fetch(platform)
       @config.locales.each do |id, codes|
         fields = @listing.locales.fetch(id)
+        play = @listing.fields_for(id, :android)
         @config.screenshots.each do |shot|
           raw = File.join(raw_dir, platform.to_s, id, "#{shot}.png")
           unless File.file?(raw)
@@ -33,7 +34,7 @@ module StoreAutopilot
         end
         next unless platform == :android
         @compose.render(template: @config.template_path("feature.html"),
-                        vars: brand_vars.merge(name: fields["name"], tagline: fields["short_description"]),
+                        vars: brand_vars.merge(name: play["name"], tagline: play["short_description"]),
                         width: FEATURE[0], height: FEATURE[1],
                         out: File.join(out_dir, "metadata", codes[:play], "images", "featureGraphic.png"))
       end

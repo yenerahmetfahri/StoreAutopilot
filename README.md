@@ -45,7 +45,8 @@ flowchart LR
 ```
 
 1. **Build number.** The highest build number in TestFlight and Google Play, plus one, used for both. The version
-   name (`1.2.0`) comes from `pubspec.yaml`.
+   name (`1.2.0`) comes from `pubspec.yaml`; its `+N` is not used, so the number in the stores can differ from it (the
+   release says so when it does).
 2. **Screenshots.** Your screenshot test (an ordinary Flutter integration test) runs on a 6.9" iPhone simulator, a 13"
    iPad simulator if the app runs on iPad, and an Android emulator, once per language.
 3. **Store images.** Each screenshot is placed in an HTML template with its caption and rendered at the exact size
@@ -111,7 +112,9 @@ In the root of your app's repository:
     storeautopilot init
 
 It asks a few questions (the app's name, languages, support and privacy URLs, App Store category, a brand color) and
-writes these files, never overwriting one that exists:
+writes these files, never overwriting one that exists. Without a terminal (a script, CI) it cannot ask; give the
+answers as options instead (`--name`, `--languages en,de`, `--support-url`, `--privacy-url`, `--category`, `--color`),
+and it lists what is still a placeholder when it finishes.
 
 | File | What it is |
 |---|---|
@@ -195,6 +198,16 @@ What's new in this version.
 - 03_stats: Watch yourself improve
 ```
 
+One text for both stores is the default. To word a field differently for one store, add a section with the store as a
+prefix; it replaces the shared one there and only there:
+
+```markdown
+## description
+Shared by both stores.
+## android_description
+Google Play only. (`ios_description` works the same way; so do `name`, `release_notes` and the other text fields.)
+```
+
 Every field is checked against the store's limit before anything is built, so a description that is too long fails
 in a second, not after a twenty-minute build:
 
@@ -241,7 +254,7 @@ Put these in `~/.storeautopilot/<app_id>/`. They stay on your Mac; nothing is st
 |---|---|
 | `asc_key.p8` | App Store Connect → Users and Access → Integrations → App Store Connect API: create a key with the App Manager role |
 | `asc_key.json` | `{"key_id": "…", "issuer_id": "…"}`, both shown on that page |
-| `play.json` | Google Cloud: a service account with a JSON key, invited in Play Console → Users and permissions with release and store listing rights |
+| `play.json` | Google Cloud: a service account with a JSON key, invited in Play Console → Users and permissions. App permissions: *Release apps to testing tracks*, *Manage store presence*, *View app information…*, and for reviews *Reply to reviews* (*Release to production…* to promote). If Google answers "caller does not have permission", the error names the one that is missing |
 
 Android release signing stays in your Gradle setup, with your upload keystore on this Mac.
 
@@ -287,6 +300,7 @@ it finished. Then the build is in TestFlight and on your Play track, and the sto
 | see what a release would do | `storeautopilot release --dry-run` |
 | release one platform | `storeautopilot release --only android` |
 | keep the screenshots already in the stores | `storeautopilot release --skip-shots` |
+| keep the text already in the stores (name, description, keywords…) | `storeautopilot release --skip-text` |
 | see both stores at a glance | `storeautopilot status` |
 | read and answer reviews | `storeautopilot reviews`, `storeautopilot reviews reply ios:123 "Thanks!"` |
 
@@ -363,7 +377,7 @@ features:
 | `rollout 50` | Widens a staged Google Play rollout; 100 finishes it (`rollout watch` with `rollout_guard`) |
 | `runner install` | Connects this Mac to the repository as its runner |
 
-Options: `--config PATH`, `--app DIR` (init), `--only ios|android`, `--dry-run`, `--skip-shots`, `--fresh-shots`,
+Options: `--config PATH`, `--app DIR` (init), `--only ios|android`, `--dry-run`, `--skip-shots`, `--skip-text`, `--fresh-shots`,
 `--online`, `--version`.
 
 ## Store images
